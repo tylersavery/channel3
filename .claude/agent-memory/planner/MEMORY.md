@@ -1,0 +1,1 @@
+- [Channel Three plan conventions](feedback_plan_conventions.md) — hardware-gated markers, four named skills, dedicated assumptions section, no em-dashes, never commit
