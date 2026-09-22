@@ -15,6 +15,14 @@ Broadcast TV appliance for kids on a Raspberry Pi. Themed channels of approved v
 
 **3333** for the web UI and API in development. Do not use 3000.
 
+## Commands
+
+- `make build` builds `bin/channel3` for the Mac. `make build-arm64` builds `bin/channel3-linux-arm64` for the Pi, static and cgo-free.
+- `make test` runs `go test -race ./...`. `make lint` runs gofmt and `go vet` and fails on any output.
+- `make run` serves against the local root on :3333. It works once `serve` accepts `--listen` in Phase 7.
+- `make dev-root` creates `~/srv/channel3/{channels,library,local}`, the local root that holds real channel config and media. Nothing from this repo goes in it.
+- Every subcommand takes `--root`, which defaults to `/srv/channel3`, is overridden by `$CHANNEL3_ROOT`, and may appear before or after the subcommand name.
+
 ## Rules
 
 - The schedule is a pure function: `(channel, t) -> (item, offset)`. Seeded shuffle per broadcast day, cumulative durations, recomputed at every boundary. No playback state is ever persisted.

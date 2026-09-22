@@ -132,10 +132,10 @@ Touch:
 
 ### Tasks
 
-1. [ ] `go mod init` and a `Makefile`. `build` produces `bin/channel3` for the host. `build-arm64` produces `bin/channel3-linux-arm64` with `CGO_ENABLED=0 GOOS=linux GOARCH=arm64`. `test` runs `go test -race ./...`. `lint` runs `gofmt -l .` and `go vet ./...` and fails on any output. `run` runs `serve --root ~/srv/channel3 --listen :3333`.
-2. [ ] `cmd/channel3/main.go` dispatches to the three subcommands with the standard library `flag` package. Unknown subcommand prints usage and exits 2.
-3. [ ] Config loader in `internal/library`: `LoadChannels(dir string) ([]Channel, error)` reads every `*.yaml` in `<root>/channels/`. `Channel{ID, Number, Name, Sources []string}`. Validate: `id` matches `^[a-z0-9][a-z0-9-]*$`, `number` is 1 to 999 and unique across all files, `name` is non-empty, every source is `http://`, `https://` or `file://`. Zero sources is allowed with a logged warning (the channel will show Stand By). Return all errors with file name and field, not just the first.
-4. [ ] Sidecar type and round-trip in `internal/library/sidecar.go`, exactly this schema. `file` is relative to the sidecar's directory, or absolute for `file://` sources. `duration` is seconds as a float. Times are RFC 3339 UTC.
+1. [x] `go mod init` and a `Makefile`. `build` produces `bin/channel3` for the host. `build-arm64` produces `bin/channel3-linux-arm64` with `CGO_ENABLED=0 GOOS=linux GOARCH=arm64`. `test` runs `go test -race ./...`. `lint` runs `gofmt -l .` and `go vet ./...` and fails on any output. `run` runs `serve --root ~/srv/channel3 --listen :3333`.
+2. [x] `cmd/channel3/main.go` dispatches to the three subcommands with the standard library `flag` package. Unknown subcommand prints usage and exits 2.
+3. [x] Config loader in `internal/library`: `LoadChannels(dir string) ([]Channel, error)` reads every `*.yaml` in `<root>/channels/`. `Channel{ID, Number, Name, Sources []string}`. Validate: `id` matches `^[a-z0-9][a-z0-9-]*$`, `number` is 1 to 999 and unique across all files, `name` is non-empty, every source is `http://`, `https://` or `file://`. Zero sources is allowed with a logged warning (the channel will show Stand By). Return all errors with file name and field, not just the first.
+4. [x] Sidecar type and round-trip in `internal/library/sidecar.go`, exactly this schema. `file` is relative to the sidecar's directory, or absolute for `file://` sources. `duration` is seconds as a float. Times are RFC 3339 UTC.
 
 ```json
 {
@@ -151,9 +151,9 @@ Touch:
 
 A failed item keeps `id`, `source`, `status: "failed"`, `error` (first line of the tool's stderr), and `attempted_at`. No `file`, no `duration`.
 
-5. [ ] Library index in `internal/library/index.go`: `Scan(root string, channels []Channel) (Index, error)` walks `<root>/library/<channel-id>/*.json`, parses sidecars, and returns per-channel items in a stable order (by id). Items are excluded, with a logged reason, when status is not `ok`, when the file does not exist, or when duration is not positive. A channel directory that does not exist yields zero items, not an error. `Item{ID, Title, Path (absolute), Duration time.Duration, Source}`.
-6. [ ] Create `~/srv/channel3/{channels,library,local}` on the Mac if absent (a `make dev-root` target is fine). Do not put anything in it from the repo.
-7. [ ] Update `CLAUDE.md` Commands section.
+5. [x] Library index in `internal/library/index.go`: `Scan(root string, channels []Channel) (Index, error)` walks `<root>/library/<channel-id>/*.json`, parses sidecars, and returns per-channel items in a stable order (by id). Items are excluded, with a logged reason, when status is not `ok`, when the file does not exist, or when duration is not positive. A channel directory that does not exist yields zero items, not an error. `Item{ID, Title, Path (absolute), Duration time.Duration, Source}`.
+6. [x] Create `~/srv/channel3/{channels,library,local}` on the Mac if absent (a `make dev-root` target is fine). Do not put anything in it from the repo.
+7. [x] Update `CLAUDE.md` Commands section.
 
 ### Tests
 

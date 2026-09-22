@@ -1,0 +1,20 @@
+# Example channel. This is the only YAML this repository carries.
+#
+# Real channel config lives outside the repo, next to the media it names: /srv/channel3/channels on the Pi and ~/srv/channel3/channels on the Mac.
+# Copy this file there, rename it after the channel, and edit it.
+#
+# One file is one channel. Every file in the directory is loaded, and every number must be unique across all of them.
+#
+# id: lowercase letters, digits and dashes. It names the library directory at <root>/library/<id>.
+# number: 1 to 999. This is what you type on the remote.
+# name: what the guide shows.
+# sources: youtube video URLs, playlist URLs, any other URL yt-dlp accepts, and file:// paths to video already on disk.
+# A channel with no sources is allowed. It shows the Please Stand By card until you give it something to play.
+
+id: trains
+number: 3
+name: Train TV
+sources:
+  - https://www.youtube.com/watch?v=dQw4w9WgXcQ
+  - https://www.youtube.com/playlist?list=PLxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  - file:///srv/channel3/local/steam-engines.mp4

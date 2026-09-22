@@ -1,0 +1,1 @@
+Not a channel config. LoadChannels reads *.yaml only and must ignore this file.

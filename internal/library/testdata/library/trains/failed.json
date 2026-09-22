@@ -1,0 +1,7 @@
+{
+  "id": "fail003",
+  "source": "https://www.youtube.com/watch?v=fail003",
+  "status": "failed",
+  "error": "ERROR: [youtube] fail003: Video unavailable",
+  "attempted_at": "2026-09-23T02:16:11Z"
+}
