@@ -1,0 +1,10 @@
+/bin/
+/dist/
+node_modules/
+web/dist/
+.env
+.env.*
+/library/
+/channels/*.yaml
+!/channels/example.yaml
+.DS_Store
