@@ -4,18 +4,43 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/tylersavery/channel3/internal/api"
 	"github.com/tylersavery/channel3/internal/input"
 	"github.com/tylersavery/channel3/internal/library"
 	"github.com/tylersavery/channel3/internal/player"
 	"github.com/tylersavery/channel3/internal/schedule"
+	"github.com/tylersavery/channel3/web"
+)
+
+// defaultListen is the address the guide is served on. The project pins 3333
+// for development and uses the same port on the Pi, where nothing else listens.
+const defaultListen = ":3333"
+
+// embeddedUIDir is where the Vite build lands inside web/dist, which is what
+// web.Dist embeds.
+const embeddedUIDir = "dist/ui"
+
+// HTTP server timeouts. A phone on the home network is the only client, so
+// these are short: nothing here streams, and every response is a small JSON
+// document or one file out of a build.
+const (
+	httpReadHeaderTimeout = 5 * time.Second
+	httpReadTimeout       = 10 * time.Second
+	httpWriteTimeout      = 30 * time.Second
+	httpIdleTimeout       = 60 * time.Second
+	httpShutdownTimeout   = 5 * time.Second
 )
 
 // repeatedFlag collects a flag given more than once, in the order it was given.
@@ -28,12 +53,13 @@ func (f *repeatedFlag) Set(value string) error {
 	return nil
 }
 
-// runServe runs the broadcast service: the mpv supervisor and the station loop.
-//
-// Phase 7 adds --listen here.
+// runServe runs the broadcast service: the mpv supervisor, the station loop and
+// the guide API.
 func runServe(g *globals, args []string) error {
 	fs := g.flagSet("serve")
 	mpvPath := fs.String("mpv", "mpv", "path to the mpv binary")
+	listen := fs.String("listen", defaultListen, "address the guide API and web interface listen on")
+	uiDir := fs.String("ui-dir", "", "serve the web interface from this directory instead of the build embedded in the binary")
 	var mpvArgs repeatedFlag
 	fs.Var(&mpvArgs, "mpv-arg", "extra argument passed to mpv, repeatable")
 	startChannel := fs.String("start-channel", "", "channel id to tune at startup (default the lowest numbered channel)")
@@ -57,6 +83,8 @@ func runServe(g *globals, args []string) error {
 	if err := serve(ctx, g.root, serveOptions{
 		MPV:          *mpvPath,
 		MPVArgs:      mpvArgs,
+		Listen:       *listen,
+		UIDir:        *uiDir,
 		StartChannel: *startChannel,
 		StandbyCard:  *standby,
 		InputDevice:  *inputDevice,
@@ -71,8 +99,13 @@ func runServe(g *globals, args []string) error {
 
 // serveOptions are the serve flags, already parsed.
 type serveOptions struct {
-	MPV          string
-	MPVArgs      []string
+	MPV     string
+	MPVArgs []string
+	// Listen is the address the guide API and the web interface are served on.
+	Listen string
+	// UIDir serves the web interface from disk rather than from the build
+	// embedded in the binary, which is how the page is developed.
+	UIDir        string
 	StartChannel string
 	StandbyCard  string
 	// InputDevice is the evdev device to read. Empty auto-detects.
@@ -106,6 +139,42 @@ func serve(ctx context.Context, root string, opts serveOptions) error {
 	} else if _, err := os.Stat(card); err != nil {
 		return fmt.Errorf("serve: --standby %s: %w", card, err)
 	}
+
+	clock := schedule.NewClock(time.Local)
+
+	// The guide answers from whichever station is running, and there is none
+	// until mpv is up and the library has been read. Everything it is asked
+	// before that is answered honestly: no channels, nothing tuned.
+	var current atomic.Pointer[station]
+	ui, err := webUI(opts.UIDir)
+	if err != nil {
+		return err
+	}
+
+	// The listener goes up before mpv. An appliance whose television is dark
+	// because mpv will not start is exactly when someone reaches for their
+	// phone, and the guide answering is how they find out the service is alive.
+	stopHTTP, err := startHTTP(opts.Listen, api.Deps{
+		Channels: func() []schedule.Channel {
+			if s := current.Load(); s != nil {
+				return s.Channels()
+			}
+			return nil
+		},
+		Now: time.Now,
+		Tuned: func() string {
+			if s := current.Load(); s != nil {
+				return s.Tuned()
+			}
+			return ""
+		},
+		Clock: clock,
+		UI:    ui,
+	})
+	if err != nil {
+		return err
+	}
+	defer stopHTTP()
 
 	// mpv runs on its own context rather than the signal context. Cancelling
 	// the signal context kills the process outright, and a Ctrl-C has to leave
@@ -144,7 +213,7 @@ func serve(ctx context.Context, root string, opts serveOptions) error {
 
 	station, err := newStation(stationOptions{
 		Player:       mpv,
-		Clock:        schedule.NewClock(time.Local),
+		Clock:        clock,
 		Now:          time.Now,
 		Reload:       func() ([]schedule.Channel, error) { return loadStation(root) },
 		StartChannel: opts.StartChannel,
@@ -155,9 +224,81 @@ func serve(ctx context.Context, root string, opts serveOptions) error {
 	if err != nil {
 		return err
 	}
+	current.Store(station)
 
 	slog.Info("broadcasting", "root", root, "channel", station.Tuned(), "pid", os.Getpid())
 	return station.run(ctx)
+}
+
+// webUI resolves where the web interface is served from.
+//
+// An empty dir takes the build embedded in the binary. A missing or empty build
+// is not an error: internal/api serves its fallback page and the API carries on,
+// which is what a fresh clone that has never run npm looks like.
+func webUI(dir string) (fs.FS, error) {
+	if dir != "" {
+		info, err := os.Stat(dir)
+		if err != nil {
+			return nil, fmt.Errorf("serve: --ui-dir %s: %w", dir, err)
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("serve: --ui-dir %s is not a directory", dir)
+		}
+		slog.Info("serving the web interface from disk", "directory", dir)
+		return os.DirFS(dir), nil
+	}
+
+	embedded, err := fs.Sub(web.Dist, embeddedUIDir)
+	if err != nil {
+		return nil, fmt.Errorf("serve: read the embedded web interface: %w", err)
+	}
+	return embedded, nil
+}
+
+// startHTTP serves the guide API and the web interface until the returned
+// function is called.
+//
+// The listener is opened before the goroutine starts, so a port already in use
+// is reported here and fails the command rather than disappearing into a log
+// line nobody reads.
+func startHTTP(address string, deps api.Deps) (func(), error) {
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		return nil, fmt.Errorf("serve: listen on %s: %w", address, err)
+	}
+
+	srv := &http.Server{
+		Handler: api.New(deps),
+		// The guide is read by phones on the home network and by nothing else.
+		// The timeouts are there so a client that opens a connection and goes
+		// away, which is what a phone locking its screen looks like, cannot
+		// hold a connection open forever.
+		ReadHeaderTimeout: httpReadHeaderTimeout,
+		ReadTimeout:       httpReadTimeout,
+		WriteTimeout:      httpWriteTimeout,
+		IdleTimeout:       httpIdleTimeout,
+	}
+
+	stopped := make(chan error, 1)
+	go func() {
+		err := srv.Serve(listener)
+		if errors.Is(err, http.ErrServerClosed) {
+			err = nil
+		}
+		stopped <- err
+	}()
+	slog.Info("guide listening", "address", listener.Addr().String())
+
+	return func() {
+		ctx, cancel := context.WithTimeout(context.Background(), httpShutdownTimeout)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			slog.Error("could not shut the guide down cleanly", "error", err)
+		}
+		if err := <-stopped; err != nil {
+			slog.Error("the guide stopped with an error", "error", err)
+		}
+	}, nil
 }
 
 // startInput opens every key source this machine has and merges them.

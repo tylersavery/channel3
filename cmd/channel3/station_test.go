@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1123,5 +1126,75 @@ func TestRolloverRetriesAfterAFailedRescan(t *testing.T) {
 	s.reconcile()
 	if scans != 3 {
 		t.Errorf("the library was scanned %d times, want no further rescan within the day", scans)
+	}
+}
+
+// TestChannelsIsSafeWhileTheListIsReplaced is the Phase 7 API reading the
+// station from the HTTP server's goroutine while the broadcast loop swaps the
+// whole channel list at the 04:00 rollover.
+//
+// It is a race detector test: run it with -race, which is what make test does.
+func TestChannelsIsSafeWhileTheListIsReplaced(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: time.Date(2026, 9, 23, 3, 50, 0, 0, time.UTC)}
+
+	// Every rescan returns a fresh slice, as loadStation does, so a reader
+	// holding the old one cannot be saved by the two sharing memory.
+	var scans atomic.Int64
+	s, err := newStation(stationOptions{
+		Player: p,
+		Clock:  schedule.NewClock(time.UTC),
+		Now:    clock.Now,
+		Reload: func() ([]schedule.Channel, error) {
+			n := scans.Add(1)
+			channels := testChannels()
+			channels[0].Name = fmt.Sprintf("Test Clips %d", n)
+			return channels, nil
+		},
+		StartChannel: "clips",
+		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Interval:     time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("new station: %v", err)
+	}
+
+	stop := make(chan struct{})
+	readers := sync.WaitGroup{}
+	for range 4 {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				for _, ch := range s.Channels() {
+					// Read every field the API reads, so the detector sees the
+					// reader touch what the rollover replaces.
+					_ = ch.ID + ch.Name + strconv.Itoa(ch.Number) + strconv.Itoa(len(ch.Items))
+				}
+				_ = s.Tuned()
+			}
+		}()
+	}
+
+	// Roll the day over repeatedly. Each one replaces the list under the lock
+	// while the readers above are walking it.
+	for i := range 20 {
+		clock.Advance(24 * time.Hour)
+		s.reconcile()
+		if i == 0 && scans.Load() < 2 {
+			t.Error("the first advance did not roll the day over")
+		}
+	}
+
+	close(stop)
+	readers.Wait()
+
+	if got := len(s.Channels()); got != len(testChannels()) {
+		t.Errorf("the station reports %d channels after the rollovers, want %d", got, len(testChannels()))
 	}
 }

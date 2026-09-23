@@ -1,0 +1,125 @@
+{
+  "from": "2026-09-22T19:04:11-04:00",
+  "to": "2026-09-22T21:04:11-04:00",
+  "channels": [
+    {
+      "id": "trains",
+      "number": 3,
+      "name": "Train TV",
+      "slots": [
+        {
+          "id": "def",
+          "title": "Switching Yard",
+          "start": "2026-09-22T18:52:39-04:00",
+          "end": "2026-09-22T19:15:27-04:00",
+          "duration": 1368
+        },
+        {
+          "id": "abc",
+          "title": "Steam Engines",
+          "start": "2026-09-22T19:15:27-04:00",
+          "end": "2026-09-22T19:25:39-04:00",
+          "duration": 612.437
+        },
+        {
+          "id": "ghi",
+          "title": "Level Crossings",
+          "start": "2026-09-22T19:25:39-04:00",
+          "end": "2026-09-22T19:35:09-04:00",
+          "duration": 570
+        },
+        {
+          "id": "def",
+          "title": "Switching Yard",
+          "start": "2026-09-22T19:35:09-04:00",
+          "end": "2026-09-22T19:57:57-04:00",
+          "duration": 1368
+        },
+        {
+          "id": "abc",
+          "title": "Steam Engines",
+          "start": "2026-09-22T19:57:57-04:00",
+          "end": "2026-09-22T20:08:10-04:00",
+          "duration": 612.437
+        },
+        {
+          "id": "ghi",
+          "title": "Level Crossings",
+          "start": "2026-09-22T20:08:10-04:00",
+          "end": "2026-09-22T20:17:40-04:00",
+          "duration": 570
+        },
+        {
+          "id": "def",
+          "title": "Switching Yard",
+          "start": "2026-09-22T20:17:40-04:00",
+          "end": "2026-09-22T20:40:28-04:00",
+          "duration": 1368
+        },
+        {
+          "id": "abc",
+          "title": "Steam Engines",
+          "start": "2026-09-22T20:40:28-04:00",
+          "end": "2026-09-22T20:50:40-04:00",
+          "duration": 612.437
+        },
+        {
+          "id": "ghi",
+          "title": "Level Crossings",
+          "start": "2026-09-22T20:50:40-04:00",
+          "end": "2026-09-22T21:00:10-04:00",
+          "duration": 570
+        },
+        {
+          "id": "def",
+          "title": "Switching Yard",
+          "start": "2026-09-22T21:00:10-04:00",
+          "end": "2026-09-22T21:22:58-04:00",
+          "duration": 1368
+        }
+      ]
+    },
+    {
+      "id": "docs",
+      "number": 7,
+      "name": "Documentaries",
+      "slots": [
+        {
+          "id": "d1",
+          "title": "Bridges",
+          "start": "2026-09-22T18:57:39-04:00",
+          "end": "2026-09-22T19:19:42-04:00",
+          "duration": 1323
+        },
+        {
+          "id": "d2",
+          "title": "Harbours",
+          "start": "2026-09-22T19:19:42-04:00",
+          "end": "2026-09-22T20:06:42-04:00",
+          "duration": 2820
+        },
+        {
+          "id": "d1",
+          "title": "Bridges",
+          "start": "2026-09-22T20:06:42-04:00",
+          "end": "2026-09-22T20:28:45-04:00",
+          "duration": 1323
+        },
+        {
+          "id": "d2",
+          "title": "Harbours",
+          "start": "2026-09-22T20:28:45-04:00",
+          "end": "2026-09-22T21:15:45-04:00",
+          "duration": 2820
+        }
+      ]
+    },
+    {
+      "id": "empty",
+      "number": 9,
+      "name": "Nothing At All",
+      "slots": []
+    }
+  ]
+}
+

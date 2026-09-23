@@ -1,0 +1,23 @@
+{
+  "channels": [
+    {
+      "id": "trains",
+      "number": 3,
+      "name": "Train TV",
+      "items": 3
+    },
+    {
+      "id": "docs",
+      "number": 7,
+      "name": "Documentaries",
+      "items": 2
+    },
+    {
+      "id": "empty",
+      "number": 9,
+      "name": "Nothing At All",
+      "items": 0
+    }
+  ]
+}
+

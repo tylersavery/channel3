@@ -56,13 +56,17 @@ type station struct {
 	// takes the tuner's default; tests shorten it.
 	digitTimeout time.Duration
 
+	// channels is the whole station, replaced wholesale at every rollover.
+	// The loop is its only writer and reads it directly; the API reads a copy
+	// through Channels, which is why every write goes through setChannels.
 	channels []schedule.Channel
 	// tuner decides what the buttons mean. It is rebuilt whenever the channel
 	// list or the tuned channel changes, which also throws away any half typed
 	// number, the right answer when the channel has just changed underneath it.
 	tuner *input.Tuner
-	// mu guards tuned, which the loop writes and the Phase 7 API reads from
-	// its own goroutine. Everything else in here belongs to the loop alone.
+	// mu guards tuned and channels, which the loop writes and the API reads
+	// from the HTTP server's goroutines. Everything else in here belongs to the
+	// loop alone.
 	mu        sync.RWMutex
 	tuned     string
 	excluded  map[string]map[string]bool
@@ -141,7 +145,7 @@ func newStation(opts stationOptions) (*station, error) {
 	if len(channels) == 0 {
 		return nil, fmt.Errorf("station: no channels are configured")
 	}
-	s.channels = channels
+	s.setChannels(channels)
 	s.day = s.clock.BroadcastDay(s.now())
 
 	if err := s.tune(opts.StartChannel); err != nil {
@@ -174,6 +178,31 @@ func (s *station) setTuned(id string) {
 	s.tuned = id
 	s.mu.Unlock()
 	s.retune()
+}
+
+// setChannels replaces the station's channel list.
+//
+// Every assignment to s.channels goes through here, so the API's reader is
+// never handed a slice header that is half written.
+func (s *station) setChannels(channels []schedule.Channel) {
+	s.mu.Lock()
+	s.channels = channels
+	s.mu.Unlock()
+}
+
+// Channels is the station's channel list, in the order it was loaded, which
+// loadStation sorts by number.
+//
+// The API reads this from the HTTP server's goroutines while the loop may be
+// replacing the list at a rollover, so the slice is copied under the lock. The
+// items inside it are not copied: nothing ever mutates an item or an Items
+// slice in place, the whole channel list is replaced instead.
+func (s *station) Channels() []schedule.Channel {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]schedule.Channel, len(s.channels))
+	copy(out, s.channels)
+	return out
 }
 
 // Tuned is the channel id currently on air.
@@ -621,7 +650,7 @@ func (s *station) rollover(day time.Time) {
 		s.play()
 		return
 	}
-	s.channels = channels
+	s.setChannels(channels)
 	s.day = day
 
 	if _, ok := s.channel(s.tuned); !ok {

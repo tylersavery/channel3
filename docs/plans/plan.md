@@ -649,11 +649,11 @@ Touch:
 
 ### Tasks
 
-1. [ ] Handlers for the three endpoints exactly as the contract. `now` and `next` come from `schedule.Guide(ch, now, 0)` limited to two slots, or equivalently `At` plus the following slot. `hours` validation returns 400 with a message.
-2. [ ] Static UI. `UI` is `fs.Sub(web.Dist, "dist/ui")` in production or `os.DirFS(--ui-dir)` in development. Missing `index.html` yields the fallback page.
-3. [ ] Fresh-clone rule. `go build ./...` and `go test ./...` must succeed with Node never installed. That is what `web/dist/.gitkeep` and the `dist/ui/` sub-directory are for: Vite in Phase 8 empties `web/dist/ui/` on each build and never touches `.gitkeep`, so builds leave the tree clean.
-4. [ ] Serve wiring. HTTP server with sane timeouts, started after the station is up so `/api/now` never sees a nil tuned channel. Log the listen address once.
-5. [ ] Integration summary at `docs/integration/guide-api.md`.
+1. [x] Handlers for the three endpoints exactly as the contract. `now` and `next` come from `schedule.Guide(ch, now, 0)` limited to two slots, or equivalently `At` plus the following slot. `hours` validation returns 400 with a message.
+2. [x] Static UI. `UI` is `fs.Sub(web.Dist, "dist/ui")` in production or `os.DirFS(--ui-dir)` in development. Missing `index.html` yields the fallback page.
+3. [x] Fresh-clone rule. `go build ./...` and `go test ./...` must succeed with Node never installed. That is what `web/dist/.gitkeep` and the `dist/ui/` sub-directory are for: Vite in Phase 8 empties `web/dist/ui/` on each build and never touches `.gitkeep`, so builds leave the tree clean.
+4. [x] Serve wiring. HTTP server with sane timeouts, started before mpv is launched so `/api/channels` and `/api/guide` answer as soon as the library is loaded; `/api/now` reports tuned null until the station tunes. Log the listen address once.
+5. [x] Integration summary at `docs/integration/guide-api.md`.
 
 ### Tests
 
