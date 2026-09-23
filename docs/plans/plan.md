@@ -279,7 +279,7 @@ Touch:
 
 ### Tasks
 
-1. [ ] Types and signatures. Keep to this shape so Phases 5 and 7 can be written against it.
+1. [x] Types and signatures. Keep to this shape so Phases 5 and 7 can be written against it.
 
 ```go
 package schedule
@@ -316,12 +316,12 @@ func At(ch Channel, t time.Time, c Clock) (Slot, bool)
 func Guide(ch Channel, from time.Time, horizon time.Duration, c Clock) []Slot
 ```
 
-2. [ ] `BroadcastDay`: a time before 04:00 local belongs to the previous calendar day's broadcast day. Build with `time.Date(y, m, d, 4, 0, 0, 0, loc)` so DST days of 23 or 25 hours are handled by the standard library, not by arithmetic on 24 hours.
-3. [ ] `Order`: seed is FNV-1a 64 of `channelID + "|" + day.Format("2006-01-02")`. Shuffle with a Fisher-Yates over a PCG generator from `math/rand/v2` seeded from that hash so the algorithm is specified and stable across Go versions. Items with zero or negative duration are dropped before shuffling.
-4. [ ] `At`: `T` is the sum of durations of the day's order. If `T` is zero return `false`. `elapsed = t - BroadcastDay(t)`, `pos = elapsed mod T`, walk cumulative durations to find the item and `offset`. Exactly on a boundary the new item starts at offset zero. `Start` and `End` are wall-clock times of this airing.
-5. [ ] `Guide`: starting from `At(from)`, append following slots by walking the order, wrapping at the end of the order, and recomputing the order when a slot crosses a broadcast-day boundary, until `horizon` is covered. The first slot carries a non-zero `Offset`; later slots carry zero.
-6. [ ] `channel3 guide` prints, per channel sorted by number, `NN  Name` then one line per slot as `HH:MM  Title  (remaining Xm for the first slot)` in local time. `--at` lets you look at any instant.
-7. [ ] `cmd/channel3/load.go` adapts `library.Channel` plus `library.Index` into `[]schedule.Channel` sorted by number. `serve` reuses this in Phase 5.
+2. [x] `BroadcastDay`: a time before 04:00 local belongs to the previous calendar day's broadcast day. Build with `time.Date(y, m, d, 4, 0, 0, 0, loc)` so DST days of 23 or 25 hours are handled by the standard library, not by arithmetic on 24 hours.
+3. [x] `Order`: seed is FNV-1a 64 of `channelID + "|" + day.Format("2006-01-02")`. Shuffle with a Fisher-Yates over a PCG generator from `math/rand/v2` seeded from that hash so the algorithm is specified and stable across Go versions. Items with zero or negative duration are dropped before shuffling.
+4. [x] `At`: `T` is the sum of durations of the day's order. If `T` is zero return `false`. `elapsed = t - BroadcastDay(t)`, `pos = elapsed mod T`, walk cumulative durations to find the item and `offset`. Exactly on a boundary the new item starts at offset zero. `Start` and `End` are wall-clock times of this airing.
+5. [x] `Guide`: starting from `At(from)`, append following slots by walking the order, wrapping at the end of the order, and recomputing the order when a slot crosses a broadcast-day boundary, until `horizon` is covered. The first slot carries a non-zero `Offset`; later slots carry zero.
+6. [x] `channel3 guide` prints, per channel sorted by number, `NN  Name` then one line per slot as `HH:MM  Title  (remaining Xm for the first slot)` in local time. `--at` lets you look at any instant.
+7. [x] `cmd/channel3/load.go` adapts `library.Channel` plus `library.Index` into `[]schedule.Channel` sorted by number. `serve` reuses this in Phase 5.
 
 ### Tests
 

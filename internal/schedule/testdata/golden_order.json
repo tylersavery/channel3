@@ -1,0 +1,48 @@
+{
+  "channel_id": "trains",
+  "day": "2026-09-22",
+  "items": [
+    {
+      "id": "dQw4w9WgXcQ",
+      "duration_seconds": 612.437
+    },
+    {
+      "id": "aB3kZ9mQ1xT",
+      "duration_seconds": 1368
+    },
+    {
+      "id": "kL0pN7vR2sY",
+      "duration_seconds": 245.019
+    },
+    {
+      "id": "mX5tG8hJ4wD",
+      "duration_seconds": 3600.5
+    },
+    {
+      "id": "qZ2fB6nC9eH",
+      "duration_seconds": 97.333
+    },
+    {
+      "id": "rT7yU1iO3aS",
+      "duration_seconds": 1805.25
+    },
+    {
+      "id": "vN4dF0gK8lP",
+      "duration_seconds": 420
+    },
+    {
+      "id": "wJ9cM2xV5bQ",
+      "duration_seconds": 738.881
+    }
+  ],
+  "order": [
+    "mX5tG8hJ4wD",
+    "dQw4w9WgXcQ",
+    "aB3kZ9mQ1xT",
+    "wJ9cM2xV5bQ",
+    "qZ2fB6nC9eH",
+    "vN4dF0gK8lP",
+    "kL0pN7vR2sY",
+    "rT7yU1iO3aS"
+  ]
+}

@@ -10,3 +10,5 @@ Phase verification on the Mac runs the built binary against `~/srv/channel3`, wh
 **Why:** The repo carries `channels/example.yaml` and fixtures only, so the only way to exercise a real end-to-end run is a root outside the repo. `.gitignore` already blocks `/library/` and `/channels/*.yaml`.
 
 **How to apply:** Back up anything under that root before a destructive check (adding a bogus URL, deleting a sidecar) and restore it afterwards. Confirm `git status` is unchanged before reporting. Network use through yt-dlp during verification has been authorised per phase, not blanket. See [[plan-amendments-during-execution]].
+
+The throwaway channel has only two items, so any check that asks for "a different order" across the 04:00 rollover cannot be demonstrated there: two items give two permutations and they collide often. Build a synthetic root with eight or more items in the scratchpad for those checks.
