@@ -1,0 +1,2 @@
+WARNING: [youtube:tab] YouTube said: The playlist does not exist.
+ERROR: [youtube:tab] PLbogus000000000000000000000000000: YouTube said: The playlist does not exist.

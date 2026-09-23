@@ -29,8 +29,12 @@ type Index struct {
 
 // Items returns one channel's playable items, ordered by item id. A channel that
 // was not scanned, or has nothing playable, returns nil.
+//
+// The result is a copy. Callers shuffle it into a schedule, and an in-place
+// shuffle of the index's own slice would make the next scan's order depend on
+// what the last caller did with it.
 func (ix Index) Items(channelID string) []Item {
-	return ix.items[channelID]
+	return slices.Clone(ix.items[channelID])
 }
 
 // LibraryDir returns the directory holding downloaded media under root.
@@ -123,8 +127,12 @@ func itemFromSidecar(channelID, dir string, s Sidecar) (Item, bool) {
 	}
 	info, err := os.Stat(path)
 	switch {
-	case err != nil:
+	case errors.Is(err, fs.ErrNotExist):
 		slog.Warn("excluding item: file is missing", "channel", channelID, "id", s.ID, "path", path)
+		return Item{}, false
+	case err != nil:
+		slog.Warn("excluding item: file cannot be read",
+			"channel", channelID, "id", s.ID, "path", path, "err", err)
 		return Item{}, false
 	case !info.Mode().IsRegular():
 		slog.Warn("excluding item: file is not a regular file", "channel", channelID, "id", s.ID, "path", path)

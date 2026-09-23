@@ -1,0 +1,44 @@
+{
+  "_type": "playlist",
+  "id": "PLTiv_XWHnOZoOvPaG7fOB50yhR7Lb0lsX",
+  "title": "Mars Sample Return",
+  "channel": "NASA Jet Propulsion Laboratory",
+  "uploader": "NASA Jet Propulsion Laboratory",
+  "playlist_count": 23,
+  "webpage_url": "https://www.youtube.com/playlist?list=PLTiv_XWHnOZoOvPaG7fOB50yhR7Lb0lsX",
+  "original_url": "https://www.youtube.com/playlist?list=PLTiv_XWHnOZoOvPaG7fOB50yhR7Lb0lsX",
+  "extractor": "youtube:tab",
+  "extractor_key": "YoutubeTab",
+  "entries": [
+    {
+      "_type": "url",
+      "ie_key": "Youtube",
+      "id": "9bLhVJKoIOg",
+      "url": "https://www.youtube.com/watch?v=9bLhVJKoIOg",
+      "title": "Meet the Mars Samples: Sapphire Canyon (Sample 25)",
+      "duration": 89,
+      "channel": "NASA Jet Propulsion Laboratory",
+      "uploader": "NASA Jet Propulsion Laboratory"
+    },
+    {
+      "_type": "url",
+      "ie_key": "Youtube",
+      "id": "0EMy3vs-UbM",
+      "url": "https://www.youtube.com/watch?v=0EMy3vs-UbM",
+      "title": "Meet the Mars Samples: Comet Geyser (Sample 24)",
+      "duration": 53,
+      "channel": "NASA Jet Propulsion Laboratory",
+      "uploader": "NASA Jet Propulsion Laboratory"
+    },
+    {
+      "_type": "url",
+      "ie_key": "Youtube",
+      "id": "SCdSSQkgn_Q",
+      "url": "https://www.youtube.com/watch?v=SCdSSQkgn_Q",
+      "title": "Meet the Mars Samples: Lefroy Bay (Sample 23) | #Shorts #Mars #NASA",
+      "duration": 60,
+      "channel": "NASA Jet Propulsion Laboratory",
+      "uploader": "NASA Jet Propulsion Laboratory"
+    }
+  ]
+}

@@ -215,15 +215,15 @@ Touch:
 
 ### Tasks
 
-1. [ ] Playlist expansion. A source URL is expanded with `yt-dlp --flat-playlist --dump-single-json`. A single video yields one entry; a playlist yields its entries in playlist order. Each entry has `id`, `url`, `title`. Unsupported or unreachable URLs produce a failed sidecar keyed by a stable hash of the URL so the failure is visible in the library and retried next run.
-2. [ ] Download. For each entry whose sidecar is absent or failed: run yt-dlp with a format selector that prefers `avc1` video at height 1080 or lower plus best audio, merged to mp4, output `<channel-dir>/<id>.<ext>`. A reasonable starting point is `-f "bv*[vcodec^=avc1][height<=1080]+ba/b[height<=1080]" --merge-output-format mp4 --no-playlist --no-overwrites`. Pass `--print-json` or read the resulting `.info.json` so the title comes from yt-dlp.
-3. [ ] Probe. After download, `ffprobe -v error -show_entries format=duration -of json` on the final file gives the duration. Fall back to yt-dlp's `duration` only if ffprobe fails, and log that. Exact durations matter because the schedule's boundaries are cumulative.
-4. [ ] `file://` sources. Stat the path, probe duration, write a sidecar whose `file` is the absolute path. Do not copy or symlink. The `id` is the slugified basename without extension; two local sources in one channel that slugify to the same id is a config error reported before any downloads start.
-5. [ ] Skip logic. An entry with an existing `ok` sidecar whose file exists is skipped without touching the network. A failed sidecar is retried. A sidecar marked `ok` whose file is missing is re-downloaded.
-6. [ ] Failure sidecars. Any yt-dlp or ffprobe error writes a failed sidecar with the first line of stderr, then ingest continues with the next entry. Ingest never aborts a run because one video failed.
-7. [ ] Summary and exit codes. Print one line per entry (`ok`, `skip`, `failed <reason>`) and a final count. Exit 0 if nothing failed, 2 if any item failed, 1 on config or usage errors.
-8. [ ] Playback guard. If `<root>/serve.pid` exists and that process is alive, refuse to run and say so. Phase 5's `serve` writes this file. Until Phase 5 exists the check simply finds no file.
-9. [ ] `--dry-run` performs expansion but no downloads, and prints the plan.
+1. [x] Playlist expansion. A source URL is expanded with `yt-dlp --flat-playlist --dump-single-json`. A single video yields one entry; a playlist yields its entries in playlist order. Each entry has `id`, `url`, `title`. Unsupported or unreachable URLs produce a failed sidecar keyed by a stable hash of the URL so the failure is visible in the library and retried next run.
+2. [x] Download. For each entry whose sidecar is absent or failed: run yt-dlp with a format selector that prefers `avc1` video at height 1080 or lower plus best audio, merged to mp4, output `<channel-dir>/<id>.<ext>`. A reasonable starting point is `-f "bv*[vcodec^=avc1][height<=1080]+ba/b[height<=1080]" --merge-output-format mp4 --no-playlist --no-overwrites`. Pass `--print-json` or read the resulting `.info.json` so the title comes from yt-dlp.
+3. [x] Probe. After download, `ffprobe -v error -show_entries format=duration -of json` on the final file gives the duration. Fall back to yt-dlp's `duration` only if ffprobe fails, and log that. Exact durations matter because the schedule's boundaries are cumulative.
+4. [x] `file://` sources. Stat the path, probe duration, write a sidecar whose `file` is the absolute path. Do not copy or symlink. The `id` is the slugified basename without extension; two local sources in one channel that slugify to the same id is a config error reported before any downloads start.
+5. [x] Skip logic. An entry with an existing `ok` sidecar whose file exists is skipped without touching the network. A failed sidecar is retried. A sidecar marked `ok` whose file is missing is re-downloaded.
+6. [x] Failure sidecars. Any yt-dlp or ffprobe error writes a failed sidecar with the first line of stderr, then ingest continues with the next entry. Ingest never aborts a run because one video failed.
+7. [x] Summary and exit codes. Print one line per entry (`ok`, `skip`, `failed <reason>`) and a final count. Exit 0 if nothing failed, 2 if any item failed, 1 on config or usage errors.
+8. [x] Playback guard. If `<root>/serve.pid` exists and that process is alive, refuse to run and say so. Phase 5's `serve` writes this file. Until Phase 5 exists the check simply finds no file.
+9. [x] `--dry-run` performs expansion but no downloads, and prints the plan.
 
 ### Tests
 
@@ -243,7 +243,7 @@ Touch:
 
 - [ ] `make lint` and `make test` pass.
 - [ ] Put a real config with one short YouTube video and one `file://` source in `~/srv/channel3/channels/`, run `bin/channel3 ingest --root ~/srv/channel3 --dry-run`, then without `--dry-run`. Both items get ok sidecars; the mp4 plays in QuickTime or mpv; `duration` matches `ffprobe` to the millisecond.
-- [ ] Run ingest again. Every line says `skip` and yt-dlp is not invoked (check with `--yt-dlp /bin/false`).
+- [ ] Run ingest again. Every entry says `skip`, nothing is downloaded or probed, and media mtimes are unchanged. Source expansion still calls yt-dlp on every run so it notices videos added to a playlist; `--yt-dlp /usr/bin/false` therefore fails at expansion, which is expected, not a skip.
 - [ ] Add a bogus URL to the config and run again. Exit code is 2, a failed sidecar exists with a readable error, the ok items are untouched.
 - [ ] `grep -r "net/http" internal/ cmd/` shows nothing. Ingest talks to the network only through yt-dlp.
 - [ ] `CHANNEL3_NETWORK_TESTS=1 go test ./internal/library/ -run Network` passes on the Mac.

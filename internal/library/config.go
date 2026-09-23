@@ -94,7 +94,8 @@ func LoadChannels(dir string) ([]Channel, error) {
 
 	var channels []Channel
 	var problems []error
-	claimedBy := make(map[int]string)
+	numberClaimedBy := make(map[int]string)
+	idClaimedBy := make(map[string]string)
 
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".yaml" {
@@ -102,16 +103,27 @@ func LoadChannels(dir string) ([]Channel, error) {
 		}
 		name := entry.Name()
 
-		ch, numberValid, errs := readChannelFile(filepath.Join(dir, name), name)
-		if numberValid {
-			if prior, taken := claimedBy[ch.Number]; taken {
+		ch, usable, errs := readChannelFile(filepath.Join(dir, name), name)
+		if usable.id {
+			if prior, taken := idClaimedBy[ch.ID]; taken {
+				errs = append(errs, &ConfigError{
+					File:  name,
+					Field: "id",
+					Msg:   fmt.Sprintf("id %q is already used by %s", ch.ID, prior),
+				})
+			} else {
+				idClaimedBy[ch.ID] = name
+			}
+		}
+		if usable.number {
+			if prior, taken := numberClaimedBy[ch.Number]; taken {
 				errs = append(errs, &ConfigError{
 					File:  name,
 					Field: "number",
 					Msg:   fmt.Sprintf("number %d is already used by %s", ch.Number, prior),
 				})
 			} else {
-				claimedBy[ch.Number] = name
+				numberClaimedBy[ch.Number] = name
 			}
 		}
 		if len(errs) > 0 {
@@ -131,27 +143,35 @@ func LoadChannels(dir string) ([]Channel, error) {
 	return channels, nil
 }
 
-// readChannelFile parses and validates one config file. It reports whether the
-// number is usable for the duplicate check, and every problem it found.
-func readChannelFile(path, name string) (Channel, bool, []error) {
+// uniqueness says which cross-file uniqueness checks one file's fields are good
+// enough to take part in. A field that failed its own validation is left out, so
+// two files with the same malformed id are not also reported as duplicates.
+type uniqueness struct {
+	id     bool
+	number bool
+}
+
+// readChannelFile parses and validates one config file. It reports which fields
+// are usable for the duplicate checks, and every problem it found.
+func readChannelFile(path, name string) (Channel, uniqueness, []error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return Channel{}, false, []error{&ConfigError{File: name, Msg: err.Error()}}
+		return Channel{}, uniqueness{}, []error{&ConfigError{File: name, Msg: err.Error()}}
 	}
 	if len(bytes.TrimSpace(data)) == 0 {
-		return Channel{}, false, []error{&ConfigError{File: name, Msg: "file is empty"}}
+		return Channel{}, uniqueness{}, []error{&ConfigError{File: name, Msg: "file is empty"}}
 	}
 
 	// Decoding into a node map first catches typos in field names, which would
 	// otherwise leave a channel silently missing its sources.
 	var keys map[string]yaml.Node
 	if err := yaml.Unmarshal(data, &keys); err != nil {
-		return Channel{}, false, []error{&ConfigError{File: name, Msg: fmt.Sprintf("parse: %v", err)}}
+		return Channel{}, uniqueness{}, []error{&ConfigError{File: name, Msg: fmt.Sprintf("parse: %v", err)}}
 	}
 
 	var raw channelFile
 	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return Channel{}, false, []error{&ConfigError{File: name, Msg: fmt.Sprintf("parse: %v", err)}}
+		return Channel{}, uniqueness{}, []error{&ConfigError{File: name, Msg: fmt.Sprintf("parse: %v", err)}}
 	}
 
 	var errs []error
@@ -164,7 +184,8 @@ func readChannelFile(path, name string) (Channel, bool, []error) {
 			})
 		}
 	}
-	if !idPattern.MatchString(raw.ID) {
+	idValid := idPattern.MatchString(raw.ID)
+	if !idValid {
 		errs = append(errs, &ConfigError{
 			File:  name,
 			Field: "id",
@@ -196,7 +217,7 @@ func readChannelFile(path, name string) (Channel, bool, []error) {
 	}
 
 	ch := Channel{ID: raw.ID, Number: raw.Number, Name: raw.Name, Sources: raw.Sources}
-	return ch, numberValid, errs
+	return ch, uniqueness{id: idValid, number: numberValid}, errs
 }
 
 // hasAllowedScheme reports whether src starts with a scheme ingest can handle.

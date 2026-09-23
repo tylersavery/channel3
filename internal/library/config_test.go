@@ -78,6 +78,43 @@ func TestLoadChannelsDuplicateNumberAcrossFiles(t *testing.T) {
 	}
 }
 
+// TestLoadChannelsDuplicateIDAcrossFiles matters because the id names the
+// library directory: two channels sharing one would share their media.
+func TestLoadChannelsDuplicateIDAcrossFiles(t *testing.T) {
+	captureLogs(t)
+	dir := t.TempDir()
+	writeConfig(t, dir, "trains.yaml", "id: trains\nnumber: 3\nname: Train TV\nsources:\n  - https://example.com/a\n")
+	writeConfig(t, dir, "more-trains.yaml", "id: trains\nnumber: 4\nname: More Trains\nsources:\n  - https://example.com/b\n")
+
+	_, err := LoadChannels(dir)
+	if err == nil {
+		t.Fatal("LoadChannels accepted a duplicate id")
+	}
+	msg := err.Error()
+	for _, want := range []string{"more-trains.yaml", "trains.yaml", "id", "trains"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error %q does not mention %q", msg, want)
+		}
+	}
+}
+
+// TestLoadChannelsDuplicateInvalidIDReportedOnce checks that a file whose id is
+// already invalid is not also reported as a duplicate of the next bad one.
+func TestLoadChannelsDuplicateInvalidIDReportedOnce(t *testing.T) {
+	captureLogs(t)
+	dir := t.TempDir()
+	writeConfig(t, dir, "a.yaml", "id: Trains\nnumber: 3\nname: Train TV\nsources: []\n")
+	writeConfig(t, dir, "b.yaml", "id: Trains\nnumber: 4\nname: More Trains\nsources: []\n")
+
+	_, err := LoadChannels(dir)
+	if err == nil {
+		t.Fatal("LoadChannels accepted two invalid ids")
+	}
+	if got := strings.Count(err.Error(), "already used"); got != 0 {
+		t.Errorf("got %d duplicate reports for ids that are invalid anyway:\n%s", got, err)
+	}
+}
+
 func TestLoadChannelsInvalid(t *testing.T) {
 	cases := []struct {
 		name  string

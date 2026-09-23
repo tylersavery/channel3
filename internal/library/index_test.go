@@ -189,6 +189,73 @@ func TestScanSkipsUnreadableSidecar(t *testing.T) {
 	}
 }
 
+// TestItemsReturnsACopy guards the index against its callers. The schedule
+// shuffles the slice it is handed, and an in-place shuffle of the index's own
+// backing array would leak into the next caller.
+func TestItemsReturnsACopy(t *testing.T) {
+	captureLogs(t)
+
+	index, err := Scan("testdata", fixtureChannels())
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+
+	first := index.Items("trains")
+	if len(first) != 2 {
+		t.Fatalf("got %d trains items, want 2", len(first))
+	}
+	want := first[0]
+	first[0], first[1] = first[1], first[0]
+	first[0].Title = "clobbered"
+
+	second := index.Items("trains")
+	if !reflect.DeepEqual(second[0], want) {
+		t.Errorf("mutating the returned slice changed the index: got %+v, want %+v", second[0], want)
+	}
+}
+
+// TestScanLogsRealStatError covers a file whose parent is not a directory. The
+// item is still excluded, but "file is missing" would be the wrong reason.
+func TestScanLogsRealStatError(t *testing.T) {
+	logs := captureLogs(t)
+
+	root := t.TempDir()
+	channelDir := ChannelDir(root, "trains")
+	if err := os.MkdirAll(channelDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	notADir := filepath.Join(channelDir, "notadir")
+	if err := os.WriteFile(notADir, []byte("placeholder"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	err := WriteSidecar(filepath.Join(channelDir, "blocked.json"), Sidecar{
+		ID:         "blocked",
+		Title:      "Blocked",
+		Source:     "https://example.com/blocked",
+		File:       filepath.Join("notadir", "blocked.mp4"),
+		Duration:   90,
+		IngestedAt: mustTime(t, "2026-09-23T02:11:00Z"),
+		Status:     StatusOK,
+	})
+	if err != nil {
+		t.Fatalf("WriteSidecar: %v", err)
+	}
+
+	index, err := Scan(root, []Channel{{ID: "trains", Number: 3, Name: "Train TV"}})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if got := len(index.Items("trains")); got != 0 {
+		t.Fatalf("got %d items, want 0", got)
+	}
+	if got := logs.String(); !strings.Contains(got, "not a directory") {
+		t.Errorf("the real stat error was not logged:\n%s", got)
+	}
+	if got := logs.String(); strings.Contains(got, "file is missing") {
+		t.Errorf("a stat error other than not-exist was reported as a missing file:\n%s", got)
+	}
+}
+
 func TestChannelDir(t *testing.T) {
 	if got, want := ChannelDir("/srv/channel3", "trains"), "/srv/channel3/library/trains"; got != want {
 		t.Errorf("ChannelDir = %q, want %q", got, want)
