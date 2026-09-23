@@ -18,7 +18,7 @@ Broadcast TV appliance for kids on a Raspberry Pi. Themed channels of approved v
 ## Commands
 
 - `make build` builds `bin/channel3` for the Mac. `make build-arm64` builds `bin/channel3-linux-arm64` for the Pi, static and cgo-free.
-- `make test` runs `go test -race ./...`. `make lint` runs gofmt and `go vet` and fails on any output.
+- `make test` runs `go test -race ./...`. `make lint` runs gofmt and `go vet`, then `bash -n` and `shellcheck` over `deploy/*.sh`, and fails on any output. `shellcheck` comes from Homebrew: `brew install shellcheck`.
 - `make run` serves against the local root on :3333. It works once `serve` accepts `--listen` in Phase 7.
 - `make ui` builds the guide page into `web/dist/ui`, which `make build` and `make build-arm64` embed in the binary. `go build ./...` on its own never needs Node.
 - `make ui-dev` rebuilds the page on every save. Serve it from disk in another terminal with `bin/channel3 serve --root ~/srv/channel3 --ui-dir web/dist/ui`, which is one port and no Vite dev server.
@@ -45,5 +45,14 @@ internal/input/      evdev keys, CEC
 internal/api/        HTTP, embedded UI
 web/                 React UI
 channels/            example config only
+deploy/              systemd unit, Pi setup, deploy and ingest scripts
 docs/plans/          design docs and plan.md
 ```
+
+## Deploy
+
+- `make pi-setup PI_HOST=channel3.local PI_DISK=/dev/sda1` turns a freshly flashed Pi into a Channel Three box. It is idempotent.
+- `make deploy PI_HOST=channel3.local` builds arm64, copies the binary over, keeps the previous one as `channel3.prev` and restarts the service.
+- `make pi-ingest PI_HOST=channel3.local ARGS="--channel bluey"` runs an ingest on the Pi as the service user. Ingest cannot run while `serve` holds the pid guard, so it stops the service, ingests and starts it again, and the TV is dark for the duration. Ingesting on the Mac and rsyncing the library is the no-downtime route.
+- **Never deploy while ingest runs or while the kids are watching.** A deploy restarts the service and kills anything in flight.
+- Every flag Phase 4 discovers (mpv output, audio device, `--cec`, `--input-device`) lives in `/etc/default/channel3` as `CHANNEL3_FLAGS`, never in the unit. `deploy/README.md` has the full procedure.

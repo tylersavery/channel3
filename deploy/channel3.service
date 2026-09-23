@@ -1,0 +1,50 @@
+[Unit]
+Description=Channel Three broadcast service
+Documentation=https://github.com/tylersavery/channel3
+# The library lives on the USB SSD, so the service waits for local mounts and
+# refuses to start if /srv/channel3 is not mounted.
+After=local-fs.target
+RequiresMountsFor=/srv/channel3
+# network-online.target and time-sync.target are both deliberately absent.
+# Playback is local files only and the listener binds without a route, so
+# nothing here needs the network to be up, and NetworkManager-wait-online can
+# hold boot for many seconds on Wi-Fi. The schedule is a function of the clock
+# and corrects itself when NTP lands. Both would cost boot-to-video for nothing.
+# No start rate limit. This box has nobody in front of it, so it is better to
+# keep retrying once a second forever than to park in the failed state
+# overnight. Read the journal to find a crash loop; it will not be silent.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=channel3
+# video and render for DRM/KMS, input for the Flirc's evdev node, audio for
+# HDMI sound. If Phase 4 finds mpv takes DRM master as root but not as
+# channel3, add tty here, and run the Phase 4 trials as
+# `sudo -u channel3 mpv ...` rather than as root so the difference shows up
+# on the bench instead of on the first boot.
+SupplementaryGroups=video render input audio
+# :80 is a privileged port and channel3 is not root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+# /run/channel3 holds the mpv IPC socket and the unpacked Stand By card.
+# player.RuntimeDir() joins $XDG_RUNTIME_DIR and "channel3", and systemd does
+# not set XDG_RUNTIME_DIR for system services, so %t (which is /run here) is
+# what makes the two agree. Without it the socket falls back to /tmp/channel3
+# and this RuntimeDirectory sits unused.
+RuntimeDirectory=channel3
+Environment=XDG_RUNTIME_DIR=%t
+# mpv looks for its config under $HOME and would otherwise land on /.
+Environment=HOME=/srv/channel3
+# Every flag Phase 4 discovers goes in /etc/default/channel3 as CHANNEL3_FLAGS,
+# so the mpv output flags, --cec and --input-device are edited there and this
+# unit never changes. The leading - means a missing file is not an error.
+EnvironmentFile=-/etc/default/channel3
+ExecStart=/usr/local/bin/channel3 serve --root /srv/channel3 --listen :80 $CHANNEL3_FLAGS
+Restart=always
+RestartSec=1
+# serve stops cleanly on SIGINT: it shuts the HTTP listener down and kills mpv.
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target
