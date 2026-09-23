@@ -1,0 +1,307 @@
+/* The guide page. Phone first, one column, no animation but the progress bar.
+   Dark is the default because this is read in a living room with the lights
+   down; a viewer whose system asks for light gets light. */
+
+:root {
+  --bg: #0e1116;
+  --surface: #171c23;
+  --surface-raised: #1e252e;
+  --border: #2c343f;
+  --text: #f2f4f7;
+  --muted: #b6bec9;
+  --accent: #f2b134;
+  --accent-text: #f7c15c;
+  --on-accent: #1b1400;
+  --track: #2c343f;
+
+  color-scheme: dark light;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  font-size: 18px;
+  line-height: 1.4;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-text-size-adjust: 100%;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f3f4f6;
+    --surface: #ffffff;
+    --surface-raised: #fffaf0;
+    --border: #d5d9df;
+    --text: #14181d;
+    --muted: #4c5560;
+    --accent: #9a6500;
+    --accent-text: #7a4f00;
+    --on-accent: #ffffff;
+    --track: #dfe3e8;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.page {
+  max-width: 62rem;
+  margin: 0 auto;
+  padding: 1rem 1rem 3rem;
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.25rem 0 1rem;
+}
+
+.header__title {
+  margin: 0;
+  font-size: 1.5rem;
+  letter-spacing: 0.02em;
+}
+
+.header__clock {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-size: 1.25rem;
+  color: var(--muted);
+}
+
+.notice {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.empty {
+  margin: 2rem 0;
+  color: var(--muted);
+}
+
+.channels {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1rem;
+}
+
+.channel {
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-left: 6px solid transparent;
+  border-radius: 0.75rem;
+  background: var(--surface);
+}
+
+.channel--tuned {
+  border-left-color: var(--accent);
+  background: var(--surface-raised);
+}
+
+.channel__head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.channel__number {
+  flex: none;
+  min-width: 2.75rem;
+  font-size: 2.25rem;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-text);
+}
+
+.channel__heading {
+  min-width: 0;
+}
+
+.channel__name {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.channel__badge {
+  margin: 0.25rem 0 0;
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 0.35rem;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.channel__title {
+  margin: 0.85rem 0 0.5rem;
+  font-size: 1.3rem;
+  font-weight: 600;
+  /* A video id with no spaces in it must wrap rather than widen the card. */
+  overflow-wrap: anywhere;
+}
+
+.channel__standby {
+  margin: 0.85rem 0 0;
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.progress {
+  height: 0.85rem;
+  border-radius: 0.45rem;
+  background: var(--track);
+  overflow: hidden;
+}
+
+.progress__fill {
+  height: 100%;
+  background: var(--accent);
+  /* The one moving thing on the page. It steps once a second. */
+  transition: width 1s linear;
+}
+
+.channel__remaining {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.channel__next {
+  margin: 0.75rem 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.channel__nextlabel {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.channel__nexttitle {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.channel__nexttime {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.later {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.later > summary {
+  /* A thumb-sized target, which is the whole reason for the padding. */
+  padding: 0.85rem 0.25rem;
+  color: var(--accent-text);
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.later > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 0.25rem;
+}
+
+.later__empty {
+  margin: 0 0 0.75rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.later__list {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  display: grid;
+  gap: 0.1rem;
+}
+
+.later__slot {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.5rem 0.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.later__time {
+  flex: none;
+  min-width: 5.5rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.later__title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.later__more {
+  margin: 0 0 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+@media (min-width: 900px) {
+  .channels {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .channels > li {
+    display: flex;
+  }
+
+  .channel {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress__fill {
+    transition: none;
+  }
+}

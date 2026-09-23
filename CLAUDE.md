@@ -20,6 +20,9 @@ Broadcast TV appliance for kids on a Raspberry Pi. Themed channels of approved v
 - `make build` builds `bin/channel3` for the Mac. `make build-arm64` builds `bin/channel3-linux-arm64` for the Pi, static and cgo-free.
 - `make test` runs `go test -race ./...`. `make lint` runs gofmt and `go vet` and fails on any output.
 - `make run` serves against the local root on :3333. It works once `serve` accepts `--listen` in Phase 7.
+- `make ui` builds the guide page into `web/dist/ui`, which `make build` and `make build-arm64` embed in the binary. `go build ./...` on its own never needs Node.
+- `make ui-dev` rebuilds the page on every save. Serve it from disk in another terminal with `bin/channel3 serve --root ~/srv/channel3 --ui-dir web/dist/ui`, which is one port and no Vite dev server.
+- `cd web && npm run lint`, `npm run typecheck` and `npm test` cover the page. The tests pin `TZ=America/Toronto` so the formatted times are the same everywhere.
 - `make dev-root` creates `~/srv/channel3/{channels,library,local}`, the local root that holds real channel config and media. Nothing from this repo goes in it.
 - Every subcommand takes `--root`, which defaults to `/srv/channel3`, is overridden by `$CHANNEL3_ROOT`, and may appear before or after the subcommand name.
 

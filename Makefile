@@ -3,24 +3,39 @@
 
 GO ?= go
 GOFMT ?= gofmt
+NPM ?= npm
 DEV_ROOT ?= $(HOME)/srv/channel3
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X main.version=$(VERSION)
 
 .DEFAULT_GOAL := build
-.PHONY: build build-arm64 test lint run dev-root standby-card
+.PHONY: build build-arm64 ui ui-dev test lint run dev-root standby-card
 
-build:
+# Both binaries embed the web interface, so both wait on the Vite build.
+# Plain `go build ./...` does not: web/dist/.gitkeep keeps the embed pattern
+# matching on a fresh clone, so the Go toolchain never needs Node.
+build: ui
 	$(GO) build -ldflags "$(LDFLAGS)" -o bin/channel3 ./cmd/channel3
 
-build-arm64:
+build-arm64: ui
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -ldflags "$(LDFLAGS)" -o bin/channel3-linux-arm64 ./cmd/channel3
+
+# The guide page. Vite writes web/dist/ui, which web/embed.go carries into the
+# binary. It empties that directory on every build and never touches .gitkeep.
+ui:
+	cd web && $(NPM) ci && $(NPM) run build
+
+# Rebuilds the page on every save. Serve the result with
+# `bin/channel3 serve --root $(DEV_ROOT) --ui-dir web/dist/ui` in another
+# terminal: one port, no Vite dev server.
+ui-dev:
+	cd web && $(NPM) run dev
 
 test:
 	$(GO) test -race ./...
 
 lint:
-	@unformatted="$$($(GOFMT) -l .)"; \
+	@unformatted="$$($(GOFMT) -l cmd internal tools web/embed.go)"; \
 	if [ -n "$$unformatted" ]; then \
 		echo "gofmt needs to run on:"; \
 		echo "$$unformatted"; \

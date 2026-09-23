@@ -712,13 +712,13 @@ Do not touch `web/embed.go`, `web/dist/.gitkeep`, or `.gitignore`.
 
 ### Tasks
 
-1. [ ] Scaffold Vite with the React and TypeScript template. Strip the demo. Set `outDir` and `emptyOutDir` as above. Confirm `npm run build` leaves `git status` clean apart from nothing.
-2. [ ] `api.ts`: typed fetch for `/api/now` and `/api/guide?hours=N` with the contract's shapes; a thrown error on non-2xx.
-3. [ ] `Guide.tsx`: one row per channel sorted by number: big channel number, name, now title, a progress bar from `offset / duration` advanced client-side each second between refreshes, "N min left", then next title and its start time. A channel with `now: null` shows "Please Stand By". The tuned channel gets a visible highlight. A "later" disclosure per channel expands to the guide slots for the default 6 h.
-4. [ ] `App.tsx`: fetch `/api/now` on mount and every 30 s; fetch `/api/guide` on mount and every 5 min; show the server `time` in the header; show a quiet inline error when a fetch fails and keep the last good data.
-5. [ ] Layout: single column, large touch targets, readable at arm's length on a phone; a two-column grid above 900 px is optional. No router, no state library, no component kit. Plain CSS or CSS modules.
-6. [ ] Lint and type check: `npm run lint` and `npm run typecheck` (`tsc --noEmit`) both clean.
-7. [ ] Makefile and CLAUDE.md updates.
+1. [x] Scaffold Vite with the React and TypeScript template. Strip the demo. Set `outDir` and `emptyOutDir` as above. Confirm `npm run build` leaves `git status` clean apart from nothing.
+2. [x] `api.ts`: typed fetch for `/api/now` and `/api/guide?hours=N` with the contract's shapes; a thrown error on non-2xx.
+3. [x] `Guide.tsx`: one row per channel sorted by number: big channel number, name, now title, a progress bar from `offset / duration` advanced client-side each second between refreshes, "N min left", then next title and its start time. A channel with `now: null` shows "Please Stand By". The tuned channel gets a visible highlight. A "later" disclosure per channel expands to the guide slots for the default 6 h.
+4. [x] `App.tsx`: fetch `/api/now` on mount and every 30 s; fetch `/api/guide` on mount and every 5 min; show the server `time` in the header; show a quiet inline error when a fetch fails and keep the last good data.
+5. [x] Layout: single column, large touch targets, readable at arm's length on a phone; a two-column grid above 900 px is optional. No router, no state library, no component kit. Plain CSS or CSS modules.
+6. [x] Lint and type check: `npm run lint` and `npm run typecheck` (`tsc --noEmit`) both clean.
+7. [x] Makefile and CLAUDE.md updates.
 
 ### Tests
 
@@ -740,7 +740,7 @@ Do not touch `web/embed.go`, `web/dist/.gitkeep`, or `.gitignore`.
 - [ ] Rows are in channel-number order, the tuned channel is highlighted, the progress bar moves, and the page updates within 30 s of a channel change made from the terminal.
 - [ ] Open from a phone on the same network at `http://<mac-ip>:3333/`. Text is readable and nothing overflows horizontally.
 - [ ] Stop `serve` with the page open: the page shows its inline error and keeps the last data instead of blanking.
-- [ ] `grep -rn "fetch(" web/src | grep -v "/api/"` finds nothing. The page calls only its own API and only with GET.
+- [ ] Exactly one `fetch(` call exists under `web/src` (the shared helper in `api.ts`) and every URL literal there begins with `/api/`. The page calls only its own API and only with GET.
 - [ ] `web/embed.go`, `web/dist/.gitkeep` and `.gitignore` are unchanged in the diff.
 
 ---

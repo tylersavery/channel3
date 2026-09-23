@@ -1,0 +1,523 @@
+{
+  "from": "2026-09-23T03:58:11-04:00",
+  "to": "2026-09-23T09:58:11-04:00",
+  "channels": [
+    {
+      "id": "clips",
+      "number": 5,
+      "name": "Short Clips",
+      "slots": [
+        {
+          "id": "mars",
+          "title": "Mars in a Minute: How Do You Land on Mars?",
+          "start": "2026-09-23T03:57:13-04:00",
+          "end": "2026-09-23T03:58:13-04:00",
+          "duration": 60.093243
+        },
+        {
+          "id": "dwarf",
+          "title": "Dwarf Planets, Ranked",
+          "start": "2026-09-23T03:58:13-04:00",
+          "end": "2026-09-23T04:00:00-04:00",
+          "duration": 233.0
+        },
+        {
+          "id": "moon",
+          "title": "Moon Phases Explained",
+          "start": "2026-09-23T04:00:00-04:00",
+          "end": "2026-09-23T04:06:12-04:00",
+          "duration": 372.51
+        },
+        {
+          "id": "mars",
+          "title": "Mars in a Minute: How Do You Land on Mars?",
+          "start": "2026-09-23T04:06:12-04:00",
+          "end": "2026-09-23T04:07:12-04:00",
+          "duration": 60.093243
+        },
+        {
+          "id": "tides",
+          "title": "Why the Tides Go Out",
+          "start": "2026-09-23T04:07:12-04:00",
+          "end": "2026-09-23T04:15:16-04:00",
+          "duration": 484.0
+        },
+        {
+          "id": "comets",
+          "title": "Comets, Close Up",
+          "start": "2026-09-23T04:15:16-04:00",
+          "end": "2026-09-23T04:30:38-04:00",
+          "duration": 921.75
+        },
+        {
+          "id": "moon",
+          "title": "Moon Phases Explained",
+          "start": "2026-09-23T04:30:38-04:00",
+          "end": "2026-09-23T04:36:50-04:00",
+          "duration": 372.51
+        },
+        {
+          "id": "mars",
+          "title": "Mars in a Minute: How Do You Land on Mars?",
+          "start": "2026-09-23T04:36:50-04:00",
+          "end": "2026-09-23T04:37:50-04:00",
+          "duration": 60.093243
+        },
+        {
+          "id": "tides",
+          "title": "Why the Tides Go Out",
+          "start": "2026-09-23T04:37:50-04:00",
+          "end": "2026-09-23T04:45:54-04:00",
+          "duration": 484.0
+        },
+        {
+          "id": "comets",
+          "title": "Comets, Close Up",
+          "start": "2026-09-23T04:45:54-04:00",
+          "end": "2026-09-23T05:01:16-04:00",
+          "duration": 921.75
+        },
+        {
+          "id": "moon",
+          "title": "Moon Phases Explained",
+          "start": "2026-09-23T05:01:16-04:00",
+          "end": "2026-09-23T05:07:29-04:00",
+          "duration": 372.51
+        },
+        {
+          "id": "mars",
+          "title": "Mars in a Minute: How Do You Land on Mars?",
+          "start": "2026-09-23T05:07:29-04:00",
+          "end": "2026-09-23T05:08:29-04:00",
+          "duration": 60.093243
+        },
+        {
+          "id": "tides",
+          "title": "Why the Tides Go Out",
+          "start": "2026-09-23T05:08:29-04:00",
+          "end": "2026-09-23T05:16:33-04:00",
+          "duration": 484.0
+        },
+        {
+          "id": "comets",
+          "title": "Comets, Close Up",
+          "start": "2026-09-23T05:16:33-04:00",
+          "end": "2026-09-23T05:31:55-04:00",
+          "duration": 921.75
+        },
+        {
+          "id": "moon",
+          "title": "Moon Phases Explained",
+          "start": "2026-09-23T05:31:55-04:00",
+          "end": "2026-09-23T05:38:07-04:00",
+          "duration": 372.51
+        },
+        {
+          "id": "mars",
+          "title": "Mars in a Minute: How Do You Land on Mars?",
+          "start": "2026-09-23T05:38:07-04:00",
+          "end": "2026-09-23T05:39:07-04:00",
+          "duration": 60.093243
+        },
+        {
+          "id": "tides",
+          "title": "Why the Tides Go Out",
+          "start": "2026-09-23T05:39:07-04:00",
+          "end": "2026-09-23T05:47:11-04:00",
+          "duration": 484.0
+        },
+        {
+          "id": "comets",
+          "title": "Comets, Close Up",
+          "start": "2026-09-23T05:47:11-04:00",
+          "end": "2026-09-23T06:02:33-04:00",
+          "duration": 921.75
+        },
+        {
+          "id": "moon",
+          "title": "Moon Phases Explained",
+          "start": "2026-09-23T06:02:33-04:00",
+          "end": "2026-09-23T06:08:45-04:00",
+          "duration": 372.51
+        },
+        {
+          "id": "mars",
+          "title": "Mars in a Minute: How Do You Land on Mars?",
+          "start": "2026-09-23T06:08:45-04:00",
+          "end": "2026-09-23T06:09:46-04:00",
+          "duration": 60.093243
+        },
+        {
+          "id": "tides",
+          "title": "Why the Tides Go Out",
+          "start": "2026-09-23T06:09:46-04:00",
+          "end": "2026-09-23T06:17:50-04:00",
+          "duration": 484.0
+        },
+        {
+          "id": "comets",
+          "title": "Comets, Close Up",
+          "start": "2026-09-23T06:17:50-04:00",
+          "end": "2026-09-23T06:33:11-04:00",
+          "duration": 921.75
+        },
+        {
+          "id": "moon",
+          "title": "Moon Phases Explained",
+          "start": "2026-09-23T06:33:11-04:00",
+          "end": "2026-09-23T06:39:24-04:00",
+          "duration": 372.51
+        },
+        {
+          "id": "mars",
+          "title": "Mars in a Minute: How Do You Land on Mars?",
+          "start": "2026-09-23T06:39:24-04:00",
+          "end": "2026-09-23T06:40:24-04:00",
+          "duration": 60.093243
+        },
+        {
+          "id": "tides",
+          "title": "Why the Tides Go Out",
+          "start": "2026-09-23T06:40:24-04:00",
+          "end": "2026-09-23T06:48:28-04:00",
+          "duration": 484.0
+        },
+        {
+          "id": "comets",
+          "title": "Comets, Close Up",
+          "start": "2026-09-23T06:48:28-04:00",
+          "end": "2026-09-23T07:03:50-04:00",
+          "duration": 921.75
+        },
+        {
+          "id": "moon",
+          "title": "Moon Phases Explained",
+          "start": "2026-09-23T07:03:50-04:00",
+          "end": "2026-09-23T07:10:02-04:00",
+          "duration": 372.51
+        },
+        {
+          "id": "mars",
+          "title": "Mars in a Minute: How Do You Land on Mars?",
+          "start": "2026-09-23T07:10:02-04:00",
+          "end": "2026-09-23T07:11:02-04:00",
+          "duration": 60.093243
+        },
+        {
+          "id": "tides",
+          "title": "Why the Tides Go Out",
+          "start": "2026-09-23T07:11:02-04:00",
+          "end": "2026-09-23T07:19:06-04:00",
+          "duration": 484.0
+        },
+        {
+          "id": "comets",
+          "title": "Comets, Close Up",
+          "start": "2026-09-23T07:19:06-04:00",
+          "end": "2026-09-23T07:34:28-04:00",
+          "duration": 921.75
+        },
+        {
+          "id": "moon",
+          "title": "Moon Phases Explained",
+          "start": "2026-09-23T07:34:28-04:00",
+          "end": "2026-09-23T07:40:40-04:00",
+          "duration": 372.51
+        },
+        {
+          "id": "mars",
+          "title": "Mars in a Minute: How Do You Land on Mars?",
+          "start": "2026-09-23T07:40:40-04:00",
+          "end": "2026-09-23T07:41:41-04:00",
+          "duration": 60.093243
+        },
+        {
+          "id": "tides",
+          "title": "Why the Tides Go Out",
+          "start": "2026-09-23T07:41:41-04:00",
+          "end": "2026-09-23T07:49:45-04:00",
+          "duration": 484.0
+        },
+        {
+          "id": "comets",
+          "title": "Comets, Close Up",
+          "start": "2026-09-23T07:49:45-04:00",
+          "end": "2026-09-23T08:05:06-04:00",
+          "duration": 921.75
+        },
+        {
+          "id": "moon",
+          "title": "Moon Phases Explained",
+          "start": "2026-09-23T08:05:06-04:00",
+          "end": "2026-09-23T08:11:19-04:00",
+          "duration": 372.51
+        },
+        {
+          "id": "mars",
+          "title": "Mars in a Minute: How Do You Land on Mars?",
+          "start": "2026-09-23T08:11:19-04:00",
+          "end": "2026-09-23T08:12:19-04:00",
+          "duration": 60.093243
+        },
+        {
+          "id": "tides",
+          "title": "Why the Tides Go Out",
+          "start": "2026-09-23T08:12:19-04:00",
+          "end": "2026-09-23T08:20:23-04:00",
+          "duration": 484.0
+        },
+        {
+          "id": "comets",
+          "title": "Comets, Close Up",
+          "start": "2026-09-23T08:20:23-04:00",
+          "end": "2026-09-23T08:35:45-04:00",
+          "duration": 921.75
+        },
+        {
+          "id": "moon",
+          "title": "Moon Phases Explained",
+          "start": "2026-09-23T08:35:45-04:00",
+          "end": "2026-09-23T08:41:57-04:00",
+          "duration": 372.51
+        },
+        {
+          "id": "mars",
+          "title": "Mars in a Minute: How Do You Land on Mars?",
+          "start": "2026-09-23T08:41:57-04:00",
+          "end": "2026-09-23T08:42:57-04:00",
+          "duration": 60.093243
+        },
+        {
+          "id": "tides",
+          "title": "Why the Tides Go Out",
+          "start": "2026-09-23T08:42:57-04:00",
+          "end": "2026-09-23T08:51:01-04:00",
+          "duration": 484.0
+        },
+        {
+          "id": "comets",
+          "title": "Comets, Close Up",
+          "start": "2026-09-23T08:51:01-04:00",
+          "end": "2026-09-23T09:06:23-04:00",
+          "duration": 921.75
+        },
+        {
+          "id": "moon",
+          "title": "Moon Phases Explained",
+          "start": "2026-09-23T09:06:23-04:00",
+          "end": "2026-09-23T09:12:36-04:00",
+          "duration": 372.51
+        },
+        {
+          "id": "mars",
+          "title": "Mars in a Minute: How Do You Land on Mars?",
+          "start": "2026-09-23T09:12:36-04:00",
+          "end": "2026-09-23T09:13:36-04:00",
+          "duration": 60.093243
+        },
+        {
+          "id": "tides",
+          "title": "Why the Tides Go Out",
+          "start": "2026-09-23T09:13:36-04:00",
+          "end": "2026-09-23T09:21:40-04:00",
+          "duration": 484.0
+        },
+        {
+          "id": "comets",
+          "title": "Comets, Close Up",
+          "start": "2026-09-23T09:21:40-04:00",
+          "end": "2026-09-23T09:37:01-04:00",
+          "duration": 921.75
+        },
+        {
+          "id": "moon",
+          "title": "Moon Phases Explained",
+          "start": "2026-09-23T09:37:01-04:00",
+          "end": "2026-09-23T09:43:14-04:00",
+          "duration": 372.51
+        },
+        {
+          "id": "mars",
+          "title": "Mars in a Minute: How Do You Land on Mars?",
+          "start": "2026-09-23T09:43:14-04:00",
+          "end": "2026-09-23T09:44:14-04:00",
+          "duration": 60.093243
+        },
+        {
+          "id": "tides",
+          "title": "Why the Tides Go Out",
+          "start": "2026-09-23T09:44:14-04:00",
+          "end": "2026-09-23T09:52:18-04:00",
+          "duration": 484.0
+        },
+        {
+          "id": "comets",
+          "title": "Comets, Close Up",
+          "start": "2026-09-23T09:52:18-04:00",
+          "end": "2026-09-23T10:07:40-04:00",
+          "duration": 921.75
+        }
+      ]
+    },
+    {
+      "id": "standby",
+      "number": 9,
+      "name": "Nothing At All",
+      "slots": []
+    },
+    {
+      "id": "trains",
+      "number": 3,
+      "name": "Train TV",
+      "slots": [
+        {
+          "id": "yard",
+          "title": "Switching Yard",
+          "start": "2026-09-23T03:52:39-04:00",
+          "end": "2026-09-23T04:00:00-04:00",
+          "duration": 1368.0
+        },
+        {
+          "id": "steam",
+          "title": "Steam Engines",
+          "start": "2026-09-23T04:00:00-04:00",
+          "end": "2026-09-23T04:10:12-04:00",
+          "duration": 612.437
+        },
+        {
+          "id": "crossing",
+          "title": "Level Crossings",
+          "start": "2026-09-23T04:10:12-04:00",
+          "end": "2026-09-23T04:22:41-04:00",
+          "duration": 749.0
+        },
+        {
+          "id": "yard",
+          "title": "Switching Yard",
+          "start": "2026-09-23T04:22:41-04:00",
+          "end": "2026-09-23T04:45:29-04:00",
+          "duration": 1368.0
+        },
+        {
+          "id": "freight",
+          "title": "Freight Through the Rockies",
+          "start": "2026-09-23T04:45:29-04:00",
+          "end": "2026-09-23T05:15:31-04:00",
+          "duration": 1802.25
+        },
+        {
+          "id": "steam",
+          "title": "Steam Engines",
+          "start": "2026-09-23T05:15:31-04:00",
+          "end": "2026-09-23T05:25:44-04:00",
+          "duration": 612.437
+        },
+        {
+          "id": "crossing",
+          "title": "Level Crossings",
+          "start": "2026-09-23T05:25:44-04:00",
+          "end": "2026-09-23T05:38:13-04:00",
+          "duration": 749.0
+        },
+        {
+          "id": "yard",
+          "title": "Switching Yard",
+          "start": "2026-09-23T05:38:13-04:00",
+          "end": "2026-09-23T06:01:01-04:00",
+          "duration": 1368.0
+        },
+        {
+          "id": "freight",
+          "title": "Freight Through the Rockies",
+          "start": "2026-09-23T06:01:01-04:00",
+          "end": "2026-09-23T06:31:03-04:00",
+          "duration": 1802.25
+        },
+        {
+          "id": "steam",
+          "title": "Steam Engines",
+          "start": "2026-09-23T06:31:03-04:00",
+          "end": "2026-09-23T06:41:15-04:00",
+          "duration": 612.437
+        },
+        {
+          "id": "crossing",
+          "title": "Level Crossings",
+          "start": "2026-09-23T06:41:15-04:00",
+          "end": "2026-09-23T06:53:44-04:00",
+          "duration": 749.0
+        },
+        {
+          "id": "yard",
+          "title": "Switching Yard",
+          "start": "2026-09-23T06:53:44-04:00",
+          "end": "2026-09-23T07:16:32-04:00",
+          "duration": 1368.0
+        },
+        {
+          "id": "freight",
+          "title": "Freight Through the Rockies",
+          "start": "2026-09-23T07:16:32-04:00",
+          "end": "2026-09-23T07:46:35-04:00",
+          "duration": 1802.25
+        },
+        {
+          "id": "steam",
+          "title": "Steam Engines",
+          "start": "2026-09-23T07:46:35-04:00",
+          "end": "2026-09-23T07:56:47-04:00",
+          "duration": 612.437
+        },
+        {
+          "id": "crossing",
+          "title": "Level Crossings",
+          "start": "2026-09-23T07:56:47-04:00",
+          "end": "2026-09-23T08:09:16-04:00",
+          "duration": 749.0
+        },
+        {
+          "id": "yard",
+          "title": "Switching Yard",
+          "start": "2026-09-23T08:09:16-04:00",
+          "end": "2026-09-23T08:32:04-04:00",
+          "duration": 1368.0
+        },
+        {
+          "id": "freight",
+          "title": "Freight Through the Rockies",
+          "start": "2026-09-23T08:32:04-04:00",
+          "end": "2026-09-23T09:02:06-04:00",
+          "duration": 1802.25
+        },
+        {
+          "id": "steam",
+          "title": "Steam Engines",
+          "start": "2026-09-23T09:02:06-04:00",
+          "end": "2026-09-23T09:12:19-04:00",
+          "duration": 612.437
+        },
+        {
+          "id": "crossing",
+          "title": "Level Crossings",
+          "start": "2026-09-23T09:12:19-04:00",
+          "end": "2026-09-23T09:24:48-04:00",
+          "duration": 749.0
+        },
+        {
+          "id": "yard",
+          "title": "Switching Yard",
+          "start": "2026-09-23T09:24:48-04:00",
+          "end": "2026-09-23T09:47:36-04:00",
+          "duration": 1368.0
+        },
+        {
+          "id": "freight",
+          "title": "Freight Through the Rockies",
+          "start": "2026-09-23T09:47:36-04:00",
+          "end": "2026-09-23T10:17:38-04:00",
+          "duration": 1802.25
+        }
+      ]
+    }
+  ]
+}

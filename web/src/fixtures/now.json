@@ -1,0 +1,55 @@
+{
+  "time": "2026-09-23T03:58:11-04:00",
+  "tuned": "clips",
+  "channels": [
+    {
+      "id": "clips",
+      "number": 5,
+      "name": "Short Clips",
+      "now": {
+        "id": "mars",
+        "title": "Mars in a Minute: How Do You Land on Mars?",
+        "start": "2026-09-23T03:57:13-04:00",
+        "end": "2026-09-23T03:58:13-04:00",
+        "duration": 60.093243,
+        "offset": 57.2
+      },
+      "next": {
+        "id": "dwarf",
+        "title": "Dwarf Planets, Ranked",
+        "start": "2026-09-23T03:58:13-04:00",
+        "end": "2026-09-23T04:00:00-04:00",
+        "duration": 233.0,
+        "offset": 0
+      }
+    },
+    {
+      "id": "standby",
+      "number": 9,
+      "name": "Nothing At All",
+      "now": null,
+      "next": null
+    },
+    {
+      "id": "trains",
+      "number": 3,
+      "name": "Train TV",
+      "now": {
+        "id": "yard",
+        "title": "Switching Yard",
+        "start": "2026-09-23T03:52:39-04:00",
+        "end": "2026-09-23T04:00:00-04:00",
+        "duration": 1368.0,
+        "offset": 331.2
+      },
+      "next": {
+        "id": "steam",
+        "title": "Steam Engines",
+        "start": "2026-09-23T04:00:00-04:00",
+        "end": "2026-09-23T04:10:12-04:00",
+        "duration": 612.437,
+        "offset": 0
+      }
+    }
+  ]
+}
