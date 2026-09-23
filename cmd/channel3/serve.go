@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tylersavery/channel3/internal/input"
 	"github.com/tylersavery/channel3/internal/library"
 	"github.com/tylersavery/channel3/internal/player"
 	"github.com/tylersavery/channel3/internal/schedule"
@@ -29,8 +30,7 @@ func (f *repeatedFlag) Set(value string) error {
 
 // runServe runs the broadcast service: the mpv supervisor and the station loop.
 //
-// Phase 6 adds --input-device, --no-input, --cec and --cec-device here, and
-// Phase 7 adds --listen.
+// Phase 7 adds --listen here.
 func runServe(g *globals, args []string) error {
 	fs := g.flagSet("serve")
 	mpvPath := fs.String("mpv", "mpv", "path to the mpv binary")
@@ -38,6 +38,10 @@ func runServe(g *globals, args []string) error {
 	fs.Var(&mpvArgs, "mpv-arg", "extra argument passed to mpv, repeatable")
 	startChannel := fs.String("start-channel", "", "channel id to tune at startup (default the lowest numbered channel)")
 	standby := fs.String("standby", "", "path to a Please Stand By image that replaces the built in card")
+	inputDevice := fs.String("input-device", "", "evdev device to read the remote from (default: find the Flirc, then any keyboard)")
+	noInput := fs.Bool("no-input", false, "do not read any keys, so the channel cannot be changed")
+	useCEC := fs.Bool("cec", false, "send power and volume keys to the television over HDMI-CEC")
+	cecDevice := fs.String("cec-device", "/dev/cec0", "CEC device cec-ctl talks to")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -55,6 +59,10 @@ func runServe(g *globals, args []string) error {
 		MPVArgs:      mpvArgs,
 		StartChannel: *startChannel,
 		StandbyCard:  *standby,
+		InputDevice:  *inputDevice,
+		NoInput:      *noInput,
+		CEC:          *useCEC,
+		CECDevice:    *cecDevice,
 	}); err != nil {
 		return &exitError{code: 1, err: err}
 	}
@@ -67,6 +75,14 @@ type serveOptions struct {
 	MPVArgs      []string
 	StartChannel string
 	StandbyCard  string
+	// InputDevice is the evdev device to read. Empty auto-detects.
+	InputDevice string
+	// NoInput turns every key source off.
+	NoInput bool
+	// CEC turns on forwarding power and volume to the television.
+	CEC bool
+	// CECDevice is the CEC character device cec-ctl is pointed at.
+	CECDevice string
 }
 
 // serve broadcasts until the context is cancelled.
@@ -114,6 +130,18 @@ func serve(ctx context.Context, root string, opts serveOptions) error {
 		}
 	}()
 
+	keys, stopInput := startInput(ctx, opts, slog.Default())
+	// The terminal is put back before this function returns rather than when
+	// the source's own goroutine gets round to it, so a Ctrl-C never leaves the
+	// developer's shell in raw mode.
+	defer stopInput()
+
+	var tv input.CEC
+	if opts.CEC {
+		tv = input.NewCEC(opts.CECDevice, slog.Default())
+		slog.Info("television control is on", "cec device", opts.CECDevice)
+	}
+
 	station, err := newStation(stationOptions{
 		Player:       mpv,
 		Clock:        schedule.NewClock(time.Local),
@@ -121,13 +149,61 @@ func serve(ctx context.Context, root string, opts serveOptions) error {
 		Reload:       func() ([]schedule.Channel, error) { return loadStation(root) },
 		StartChannel: opts.StartChannel,
 		Logger:       slog.Default(),
+		Keys:         keys,
+		CEC:          tv,
 	})
 	if err != nil {
 		return err
 	}
 
-	slog.Info("broadcasting", "root", root, "channel", station.tuned, "pid", os.Getpid())
+	slog.Info("broadcasting", "root", root, "channel", station.Tuned(), "pid", os.Getpid())
 	return station.run(ctx)
+}
+
+// startInput opens every key source this machine has and merges them.
+//
+// On the Pi that is the evdev device the Flirc presents, and there is no
+// terminal. On a Mac it is the terminal, and there is no evdev. A source that
+// cannot be opened is a warning and nothing more: a television with no remote
+// still plays the channel it booted on, which is a far better failure than not
+// booting.
+//
+// The returned function restores anything the sources changed about the
+// terminal and must be called before the process exits.
+func startInput(ctx context.Context, opts serveOptions, log *slog.Logger) (<-chan input.Key, func()) {
+	if opts.NoInput {
+		log.Info("input is off, the channel cannot be changed")
+		return nil, func() {}
+	}
+
+	var sources []input.Source
+	restore := func() {}
+
+	if input.IsTerminal(os.Stdin) {
+		log.Info("reading keys from the terminal", "keys", "+ and - or the arrows to change channel, digits to tune, p power, [ and ] volume")
+		tty := input.NewTTY(os.Stdin, log)
+		restore = tty.Restore
+		sources = append(sources, tty)
+	}
+
+	device := opts.InputDevice
+	if device == "" {
+		found, err := input.DetectDevice()
+		if err != nil {
+			log.Warn("no remote was found, the channel can only be changed from the terminal", "error", err)
+		} else {
+			device = found
+		}
+	}
+	if device != "" {
+		sources = append(sources, input.NewDevice(device, log))
+	}
+
+	if len(sources) == 0 {
+		log.Warn("no key sources are available, the channel cannot be changed")
+		return nil, restore
+	}
+	return input.Merge(ctx, sources...), restore
 }
 
 // writePIDFile records this process id so ingest can refuse to run during a

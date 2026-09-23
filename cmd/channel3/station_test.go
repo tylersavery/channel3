@@ -1,14 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/tylersavery/channel3/internal/input"
 	"github.com/tylersavery/channel3/internal/player"
 	"github.com/tylersavery/channel3/internal/schedule"
 )
@@ -514,6 +517,444 @@ func TestPlayerStoppingEndsTheRun(t *testing.T) {
 	err := s.run(t.Context())
 	if err == nil {
 		t.Fatal("expected an error when the player stopped")
+	}
+}
+
+// keyChannels is a station with three numbered channels, all playable. The
+// numbers matter: 1 is a channel in its own right and also the start of 12, so
+// keying 1 is the case the tuner has to wait on.
+func keyChannels() []schedule.Channel {
+	return []schedule.Channel{
+		{
+			ID: "kids", Number: 1, Name: "Kids",
+			Items: []schedule.Item{{ID: "k1", Title: "Kids One", Path: "/lib/k1.mp4", Duration: 12 * time.Minute}},
+		},
+		{
+			ID: "clips", Number: 5, Name: "Test Clips",
+			Items: []schedule.Item{
+				{ID: "a", Title: "Clip A", Path: "/lib/a.mp4", Duration: 10 * time.Minute},
+				{ID: "b", Title: "Clip B", Path: "/lib/b.mp4", Duration: 21 * time.Minute},
+			},
+		},
+		{
+			ID: "docs", Number: 12, Name: "Documentaries",
+			Items: []schedule.Item{{ID: "d1", Title: "Doc One", Path: "/lib/d1.mp4", Duration: 25 * time.Minute}},
+		},
+	}
+}
+
+// runKeyStation starts a station over the given key stream and returns a stop
+// function. It is the whole loop, so the timer that commits a half typed
+// channel number is the real one.
+func runKeyStation(t *testing.T, p player.Player, clock *fakeClock, start string, channels []schedule.Channel, keys <-chan input.Key, log *slog.Logger) (*station, func()) {
+	t.Helper()
+	if log == nil {
+		log = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+	s, err := newStation(stationOptions{
+		Player:       p,
+		Clock:        schedule.NewClock(time.UTC),
+		Now:          clock.Now,
+		Reload:       func() ([]schedule.Channel, error) { return channels, nil },
+		StartChannel: start,
+		Logger:       log,
+		Interval:     time.Hour,
+		Keys:         keys,
+		DigitTimeout: 20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("new station: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- s.run(ctx) }()
+
+	return s, func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("run: %v", err)
+		}
+	}
+}
+
+// TestChannelUpTunesTheNextChannel is the remote's main button: one press, one
+// load, at the offset the new channel is already up to.
+func TestChannelUpTunesTheNextChannel(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	channels := keyChannels()
+	keys := make(chan input.Key, 1)
+
+	_, stop := runKeyStation(t, p, clock, "clips", channels, keys, nil)
+	defer stop()
+
+	waitFor(t, func() bool { return len(p.Loads()) == 1 })
+
+	keys <- input.Key{Action: input.ChannelUp}
+	waitFor(t, func() bool { return len(p.Loads()) == 2 })
+
+	// Nothing else may load: a channel change is one load, not a load per
+	// channel it passed on the way.
+	if got := len(p.Loads()); got != 2 {
+		t.Fatalf("the station loaded %d times, want the startup load and one more", got)
+	}
+	want := wantSlot(t, channels[2], clock.Now())
+	got := p.LastLoad(t)
+	if got.Path != want.Item.Path || got.Offset != want.Offset {
+		t.Errorf("after channel up the station loaded %s at %s, want %s at %s",
+			got.Path, got.Offset, want.Item.Path, want.Offset)
+	}
+}
+
+// TestChannelDownWraps checks the other direction and the wrap, from the air
+// rather than from the tuner's unit tests.
+func TestChannelDownWraps(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	channels := keyChannels()
+	keys := make(chan input.Key, 1)
+
+	_, stop := runKeyStation(t, p, clock, "kids", channels, keys, nil)
+	defer stop()
+
+	waitFor(t, func() bool { return len(p.Loads()) == 1 })
+
+	keys <- input.Key{Action: input.ChannelDown}
+	waitFor(t, func() bool { return len(p.Loads()) == 2 })
+
+	want := wantSlot(t, channels[2], clock.Now())
+	if got := p.LastLoad(t); got.Path != want.Item.Path {
+		t.Errorf("channel down from the lowest number loaded %s, want the highest channel's %s",
+			got.Path, want.Item.Path)
+	}
+}
+
+// TestDigitsTuneAfterTheTimeout is keying a channel number that could still
+// grow: nothing happens until the tuner's deadline passes, and then the typed
+// channel comes on.
+func TestDigitsTuneAfterTheTimeout(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	channels := keyChannels()
+	keys := make(chan input.Key, 1)
+
+	_, stop := runKeyStation(t, p, clock, "clips", channels, keys, nil)
+	defer stop()
+
+	waitFor(t, func() bool { return len(p.Loads()) == 1 })
+
+	keys <- input.Key{Action: input.Digit, Digit: 1}
+	waitFor(t, func() bool { return len(p.Loads()) == 2 })
+
+	want := wantSlot(t, channels[0], clock.Now())
+	got := p.LastLoad(t)
+	if got.Path != want.Item.Path || got.Offset != want.Offset {
+		t.Errorf("after keying 1 the station loaded %s at %s, want channel 1's %s at %s",
+			got.Path, got.Offset, want.Item.Path, want.Offset)
+	}
+}
+
+// TestTwoDigitsTuneAtOnce is the other half of the same rule: a number that
+// cannot grow any further does not wait for the timer.
+func TestTwoDigitsTuneAtOnce(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	channels := keyChannels()
+	keys := make(chan input.Key, 2)
+
+	station, stop := runKeyStation(t, p, clock, "clips", channels, keys, nil)
+	defer stop()
+
+	waitFor(t, func() bool { return len(p.Loads()) == 1 })
+
+	keys <- input.Key{Action: input.Digit, Digit: 1}
+	keys <- input.Key{Action: input.Digit, Digit: 2}
+	waitFor(t, func() bool { return len(p.Loads()) == 2 })
+
+	want := wantSlot(t, channels[2], clock.Now())
+	if got := p.LastLoad(t); got.Path != want.Item.Path {
+		t.Errorf("keying 12 loaded %s, want channel 12's %s", got.Path, want.Item.Path)
+	}
+	if got := station.Tuned(); got != "docs" {
+		t.Errorf("the station is tuned to %q, want docs", got)
+	}
+}
+
+// TestUnknownChannelNumberChangesNothing is keying a number nobody broadcasts
+// on: the picture does not change, nothing is loaded, and the log says why,
+// because that is the only place a press that did nothing can be explained.
+func TestUnknownChannelNumberChangesNothing(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	keys := make(chan input.Key, 1)
+	logged := &syncBuffer{}
+
+	_, stop := runKeyStation(t, p, clock, "clips", keyChannels(), keys,
+		slog.New(slog.NewTextHandler(logged, nil)))
+
+	waitFor(t, func() bool { return len(p.Loads()) == 1 })
+	before := p.LastLoad(t)
+
+	keys <- input.Key{Action: input.Digit, Digit: 9}
+	// There is nothing to wait for, so the test waits out the digit timeout
+	// and checks nothing happened.
+	time.Sleep(60 * time.Millisecond)
+
+	if got := len(p.Loads()); got != 1 {
+		t.Errorf("keying an unused channel number loaded %d times, want none", got-1)
+	}
+	if got := p.LastLoad(t); got != before {
+		t.Errorf("playback changed to %v, want it left alone", got)
+	}
+
+	// The station is stopped before the log is read, so the buffer is not
+	// being written while the test looks at it.
+	stop()
+	if got := logged.String(); !strings.Contains(got, "no channel has that number") || !strings.Contains(got, "keyed=9") {
+		t.Errorf("the log does not say the number was ignored:\n%s", got)
+	}
+}
+
+// syncBuffer is a log sink a test can read once the station has stopped.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// TestTelevisionKeysReachCEC checks power and volume go to the television and
+// never to the schedule.
+func TestTelevisionKeysReachCEC(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	channels := keyChannels()
+	keys := make(chan input.Key, 4)
+	tv := &fakeCEC{}
+
+	s, err := newStation(stationOptions{
+		Player:       p,
+		Clock:        schedule.NewClock(time.UTC),
+		Now:          clock.Now,
+		Reload:       func() ([]schedule.Channel, error) { return channels, nil },
+		StartChannel: "clips",
+		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Interval:     time.Hour,
+		Keys:         keys,
+		CEC:          tv,
+	})
+	if err != nil {
+		t.Fatalf("new station: %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- s.run(ctx) }()
+
+	waitFor(t, func() bool { return len(p.Loads()) == 1 })
+	// One at a time: the queue holds a single key on purpose, so a test that
+	// pushed all four at once would be asserting a race rather than the order.
+	for i, k := range []input.Key{
+		{Action: input.Power},
+		{Action: input.VolumeUp},
+		{Action: input.VolumeDown},
+		{Action: input.Mute},
+	} {
+		keys <- k
+		waitFor(t, func() bool { return len(tv.Calls()) == i+1 })
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	want := []string{"power", "volume-up", "volume-down", "mute"}
+	got := tv.Calls()
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("call %d is %q, want %q", i, got[i], want[i])
+		}
+	}
+	if len(p.Loads()) != 1 {
+		t.Errorf("a television key loaded %d items, want none", len(p.Loads())-1)
+	}
+}
+
+// TestTunedReportsTheChannelOnAir is what the Phase 7 API reads, and it is
+// read from another goroutine while the loop is running, which is the race the
+// API would otherwise hit.
+func TestTunedReportsTheChannelOnAir(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	keys := make(chan input.Key, 1)
+
+	station, stop := runKeyStation(t, p, clock, "clips", keyChannels(), keys, nil)
+	defer stop()
+
+	waitFor(t, func() bool { return len(p.Loads()) == 1 })
+	if got := station.Tuned(); got != "clips" {
+		t.Fatalf("tuned to %q at startup, want clips", got)
+	}
+
+	keys <- input.Key{Action: input.ChannelUp}
+	waitFor(t, func() bool { return station.Tuned() == "docs" })
+}
+
+// fakeCEC records what the television was asked to do.
+//
+// A gate holds every call until the test opens it, which is how a set that
+// takes seconds to answer, or never answers at all, is simulated.
+type fakeCEC struct {
+	mu      sync.Mutex
+	calls   []string
+	gate    chan struct{}
+	started chan string
+}
+
+func (c *fakeCEC) record(name string) error {
+	c.mu.Lock()
+	c.calls = append(c.calls, name)
+	gate, started := c.gate, c.started
+	c.mu.Unlock()
+
+	if started != nil {
+		select {
+		case started <- name:
+		default:
+		}
+	}
+	if gate != nil {
+		<-gate
+	}
+	return nil
+}
+
+func (c *fakeCEC) Power() error      { return c.record("power") }
+func (c *fakeCEC) VolumeUp() error   { return c.record("volume-up") }
+func (c *fakeCEC) VolumeDown() error { return c.record("volume-down") }
+func (c *fakeCEC) Mute() error       { return c.record("mute") }
+
+func (c *fakeCEC) Calls() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]string, len(c.calls))
+	copy(out, c.calls)
+	return out
+}
+
+// TestASlowTelevisionDoesNotStallTheBroadcast is why the television is spoken
+// to from its own goroutine: cec-ctl can sit for seconds against a set that is
+// off, and the next item must not wait behind it.
+func TestASlowTelevisionDoesNotStallTheBroadcast(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	channels := keyChannels()
+	keys := make(chan input.Key, 1)
+	tv := &fakeCEC{gate: make(chan struct{}), started: make(chan string, 4)}
+
+	s, err := newStation(stationOptions{
+		Player:       p,
+		Clock:        schedule.NewClock(time.UTC),
+		Now:          clock.Now,
+		Reload:       func() ([]schedule.Channel, error) { return channels, nil },
+		StartChannel: "clips",
+		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Interval:     time.Hour,
+		Keys:         keys,
+		CEC:          tv,
+	})
+	if err != nil {
+		t.Fatalf("new station: %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- s.run(ctx) }()
+
+	waitFor(t, func() bool { return len(p.Loads()) == 1 })
+
+	// The power command is now stuck against a television that never answers.
+	keys <- input.Key{Action: input.Power}
+	select {
+	case <-tv.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the power key never reached the television")
+	}
+
+	// The broadcast carries on regardless.
+	first := p.LastLoad(t)
+	clock.Advance(11 * time.Minute)
+	p.events <- player.Event{Kind: player.EndFile, Reason: player.ReasonEOF, Path: first.Path}
+	waitFor(t, func() bool { return len(p.Loads()) == 2 })
+
+	close(tv.gate)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("run: %v", err)
+	}
+}
+
+// TestRepeatedTelevisionKeysCollapse is the one slot queue: holding volume up
+// while the set is slow must not build a backlog of commands to send later.
+func TestRepeatedTelevisionKeysCollapse(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	channels := keyChannels()
+	keys := make(chan input.Key, 3)
+	tv := &fakeCEC{gate: make(chan struct{}), started: make(chan string, 4)}
+
+	s, err := newStation(stationOptions{
+		Player:       p,
+		Clock:        schedule.NewClock(time.UTC),
+		Now:          clock.Now,
+		Reload:       func() ([]schedule.Channel, error) { return channels, nil },
+		StartChannel: "clips",
+		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Interval:     time.Hour,
+		Keys:         keys,
+		CEC:          tv,
+	})
+	if err != nil {
+		t.Fatalf("new station: %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- s.run(ctx) }()
+
+	waitFor(t, func() bool { return len(p.Loads()) == 1 })
+
+	for range 3 {
+		keys <- input.Key{Action: input.VolumeUp}
+	}
+	// The first press is stuck at the television and the other two have been
+	// taken off the key stream by the loop.
+	select {
+	case <-tv.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the first volume key never reached the television")
+	}
+	waitFor(t, func() bool { return len(keys) == 0 })
+
+	close(tv.gate)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if got := len(tv.Calls()); got > 2 {
+		t.Errorf("three presses became %d commands, want the queue to collapse them to at most two", got)
+	} else if got < 1 {
+		t.Error("three presses reached the television as nothing at all")
 	}
 }
 

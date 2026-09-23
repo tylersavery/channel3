@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"sync"
 	"time"
 
+	"github.com/tylersavery/channel3/internal/input"
 	"github.com/tylersavery/channel3/internal/player"
 	"github.com/tylersavery/channel3/internal/schedule"
 )
@@ -39,8 +42,28 @@ type station struct {
 	reload   func() ([]schedule.Channel, error)
 	log      *slog.Logger
 	interval time.Duration
+	// keys is the merged stream of remote and keyboard presses. A nil channel
+	// is a station nobody can change, which is what --no-input asks for.
+	keys <-chan input.Key
+	// cec forwards power and volume to the television. Nil means --cec is off
+	// and those buttons are logged and dropped.
+	cec input.CEC
+	// controls hands television keys to the worker that talks to cec-ctl. It
+	// holds one key, the most recent, because a press that has been waiting
+	// behind a television that is not answering is no longer worth sending.
+	controls chan input.Key
+	// digitTimeout overrides how long the tuner waits for another digit. Zero
+	// takes the tuner's default; tests shorten it.
+	digitTimeout time.Duration
 
-	channels  []schedule.Channel
+	channels []schedule.Channel
+	// tuner decides what the buttons mean. It is rebuilt whenever the channel
+	// list or the tuned channel changes, which also throws away any half typed
+	// number, the right answer when the channel has just changed underneath it.
+	tuner *input.Tuner
+	// mu guards tuned, which the loop writes and the Phase 7 API reads from
+	// its own goroutine. Everything else in here belongs to the loop alone.
+	mu        sync.RWMutex
 	tuned     string
 	excluded  map[string]map[string]bool
 	day       time.Time
@@ -68,6 +91,13 @@ type stationOptions struct {
 	Logger       *slog.Logger
 	// Interval overrides the reconcile period. Zero takes the default.
 	Interval time.Duration
+	// Keys is the merged key stream. Nil means no input at all.
+	Keys <-chan input.Key
+	// CEC forwards power and volume to the television. Nil drops them.
+	CEC input.CEC
+	// DigitTimeout overrides how long a half typed channel number waits for
+	// another digit. Zero takes input.DigitTimeout.
+	DigitTimeout time.Duration
 }
 
 // newStation builds a station and tunes it, without starting the loop.
@@ -91,13 +121,17 @@ func newStation(opts stationOptions) (*station, error) {
 	}
 
 	s := &station{
-		player:   opts.Player,
-		clock:    opts.Clock,
-		now:      opts.Now,
-		reload:   opts.Reload,
-		log:      log,
-		interval: interval,
-		excluded: make(map[string]map[string]bool),
+		player:       opts.Player,
+		clock:        opts.Clock,
+		now:          opts.Now,
+		reload:       opts.Reload,
+		log:          log,
+		interval:     interval,
+		keys:         opts.Keys,
+		cec:          opts.CEC,
+		controls:     make(chan input.Key, 1),
+		digitTimeout: opts.DigitTimeout,
+		excluded:     make(map[string]map[string]bool),
 	}
 
 	channels, err := s.reload()
@@ -122,16 +156,54 @@ func (s *station) tune(id string) error {
 	s.stalled = false
 	if id == "" {
 		// loadStation sorts by number, so the first is the lowest.
-		s.tuned = s.channels[0].ID
+		s.setTuned(s.channels[0].ID)
 		return nil
 	}
 	for _, ch := range s.channels {
 		if ch.ID == id {
-			s.tuned = id
+			s.setTuned(id)
 			return nil
 		}
 	}
 	return fmt.Errorf("station: no channel with id %q is configured", id)
+}
+
+// setTuned records the tuned channel and rebuilds the tuner over it.
+func (s *station) setTuned(id string) {
+	s.mu.Lock()
+	s.tuned = id
+	s.mu.Unlock()
+	s.retune()
+}
+
+// Tuned is the channel id currently on air.
+//
+// Phase 7's API reads this from the HTTP server's goroutine, which is why the
+// field behind it is guarded. It reports what the station is tuned to, never
+// what mpv happens to be doing.
+func (s *station) Tuned() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.tuned
+}
+
+// retune rebuilds the tuner over the current channel list.
+//
+// It is called whenever the channels or the tuned channel change, so the tuner
+// never moves through a channel that has gone from the config.
+func (s *station) retune() {
+	s.tuner = input.NewTuner(tunerChannels(s.channels), s.tuned)
+	s.tuner.Timeout = s.digitTimeout
+}
+
+// tunerChannels is the tuner's view of the station: numbers and ids, nothing
+// about what is in them.
+func tunerChannels(channels []schedule.Channel) []input.Channel {
+	out := make([]input.Channel, 0, len(channels))
+	for _, ch := range channels {
+		out = append(out, input.Channel{ID: ch.ID, Number: ch.Number})
+	}
+	return out
 }
 
 // run drives the station until the context is cancelled.
@@ -148,6 +220,30 @@ func (s *station) run(ctx context.Context) error {
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
 
+	// digits fires when a half typed channel number has waited long enough.
+	// It is stopped whenever nothing is pending, so an idle station is not
+	// woken by it.
+	digits := time.NewTimer(time.Hour)
+	digits.Stop()
+	defer digits.Stop()
+
+	// Television keys are sent on their own goroutine. cec-ctl can sit for its
+	// full timeout against a set that is off, and an end-file event arriving
+	// meanwhile must not wait behind it: the screen would hold a finished item
+	// for as long as the television took to answer.
+	if s.cec != nil {
+		controlCtx, stopControls := context.WithCancel(ctx)
+		controlsDone := make(chan struct{})
+		go func() {
+			defer close(controlsDone)
+			s.serveControls(controlCtx)
+		}()
+		defer func() {
+			stopControls()
+			<-controlsDone
+		}()
+	}
+
 	events := s.player.Events()
 	for {
 		select {
@@ -158,9 +254,173 @@ func (s *station) run(ctx context.Context) error {
 				return fmt.Errorf("station: the player stopped")
 			}
 			s.handle(ev)
+		case key, ok := <-s.keys:
+			if !ok {
+				// Every source has gone. The broadcast carries on, nobody can
+				// change the channel, and a nil channel blocks here forever
+				// rather than spinning on a closed one.
+				s.log.Warn("no input sources are left, the channel can no longer be changed")
+				s.keys = nil
+				continue
+			}
+			s.key(key)
+		case <-digits.C:
+			s.expireDigits()
 		case <-ticker.C:
 			s.reconcile()
 		}
+		s.armDigits(digits)
+	}
+}
+
+// key acts on one press.
+func (s *station) key(k input.Key) {
+	switch k.Action {
+	case input.Power, input.VolumeUp, input.VolumeDown, input.Mute:
+		s.control(k)
+		return
+	}
+
+	pending, _ := s.tuner.Pending()
+	changed, target := s.tuner.Handle(k, s.now())
+	if changed {
+		s.tuneTo(target)
+		return
+	}
+	if k.Action == input.Digit {
+		s.reportNumber(pending+strconv.Itoa(k.Digit), target)
+	}
+}
+
+// expireDigits commits a channel number that has stopped growing.
+func (s *station) expireDigits() {
+	pending, _ := s.tuner.Pending()
+	changed, target := s.tuner.Expire()
+	if changed {
+		s.tuneTo(target)
+		return
+	}
+	if pending != "" {
+		s.reportNumber(pending, target)
+	}
+}
+
+// reportNumber says what became of a keyed channel number that did not change
+// the channel.
+//
+// Someone standing at the television has pressed a button and nothing has
+// happened, and the only place that can be explained is the log.
+func (s *station) reportNumber(number string, target input.Channel) {
+	if waiting, _ := s.tuner.Pending(); waiting != "" {
+		s.log.Debug("waiting for the rest of a channel number", "keyed", waiting)
+		return
+	}
+	if target.ID != "" {
+		s.log.Info("already on that channel", "number", target.Number, "channel", target.ID)
+		return
+	}
+	s.log.Info("no channel has that number, staying put", "keyed", number, "channel", s.tuned)
+}
+
+// armDigits sets the timer from whatever the tuner is waiting for.
+//
+// The deadline comes from the tuner, which stamped it with the station's clock,
+// so a test with a fake clock gets a wait measured in the same units it is
+// moving. Nothing is armed when no number is half typed.
+func (s *station) armDigits(timer *time.Timer) {
+	pending, deadline := s.tuner.Pending()
+	if pending == "" {
+		timer.Stop()
+		return
+	}
+	wait := deadline.Sub(s.now())
+	if wait < 0 {
+		wait = 0
+	}
+	timer.Reset(wait)
+}
+
+// tuneTo changes channel and plays whatever the new one is airing.
+//
+// Nothing about the old channel is remembered. The new channel is joined at
+// whatever it is up to, exactly as it would be on a television.
+func (s *station) tuneTo(target input.Channel) {
+	if err := s.tune(target.ID); err != nil {
+		s.log.Error("could not tune", "channel", target.ID, "error", err)
+		return
+	}
+	s.log.Info("tune", "number", target.Number, "channel", target.ID)
+	s.play()
+}
+
+// control queues a power or volume button for the television.
+//
+// These do nothing to the broadcast. With --cec off there is nowhere to send
+// them, which is the normal state on a television that does not do CEC, and the
+// press is logged so it is clear the button was seen.
+//
+// The queue holds one key. A press that arrives while the television is still
+// being spoken to replaces whatever was waiting, because volume up pressed four
+// times quickly means "louder now", not four commands to send once the set
+// finally answers.
+func (s *station) control(k input.Key) {
+	if s.cec == nil {
+		s.log.Info("ignoring a television key, cec is off", "key", k.String())
+		return
+	}
+
+	select {
+	case s.controls <- k:
+		return
+	default:
+	}
+
+	// The loop is the only sender, so at most one key is dropped here and the
+	// one just pressed takes its place.
+	select {
+	case dropped := <-s.controls:
+		s.log.Debug("dropping a television key that is still waiting", "key", dropped.String())
+	default:
+	}
+	select {
+	case s.controls <- k:
+	default:
+		s.log.Warn("could not queue a television key", "key", k.String())
+	}
+}
+
+// serveControls sends queued television keys until the station stops.
+//
+// It runs on its own goroutine so that a cec-ctl invocation, which may take its
+// full timeout, never holds up the broadcast loop.
+func (s *station) serveControls(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case k := <-s.controls:
+			s.sendControl(k)
+		}
+	}
+}
+
+// sendControl asks the television to do one thing.
+func (s *station) sendControl(k input.Key) {
+	var err error
+	switch k.Action {
+	case input.Power:
+		err = s.cec.Power()
+	case input.VolumeUp:
+		err = s.cec.VolumeUp()
+	case input.VolumeDown:
+		err = s.cec.VolumeDown()
+	case input.Mute:
+		err = s.cec.Mute()
+	}
+	if err != nil {
+		// The CEC implementation has already logged the command that failed.
+		// A television that will not listen must never stop the broadcast.
+		s.log.Debug("the television did not accept a key", "key", k.String(), "error", err)
 	}
 }
 
@@ -369,6 +629,10 @@ func (s *station) rollover(day time.Time) {
 		if err := s.tune(""); err != nil {
 			s.log.Error("could not tune a channel after the rescan", "error", err)
 		}
+	} else {
+		// The channel list the tuner moves through has just been replaced, so
+		// it is rebuilt even though the tuned channel is unchanged.
+		s.retune()
 	}
 	s.play()
 }
