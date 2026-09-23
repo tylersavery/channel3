@@ -57,7 +57,7 @@ Nothing in the unit assumes a working mpv output flag or CEC. Every hardware-dep
 1. Flash Raspberry Pi OS Lite 64-bit with Raspberry Pi Imager: hostname `channel3`, your ssh key, time zone, Wi-Fi or Ethernet. Fit the RTC coin cell. Fit the case.
 2. Enable Anynet+ on the Samsung UN40H4005AF under Menu, System, Anynet+ (HDMI-CEC).
 3. Run the whole Phase 4 checklist in `docs/plans/plan.md`, in order: mpv output flags (run the trials as `sudo -u channel3` once the user exists, so the test matches the service), audio, the service flag set, TV power cycle behaviour, the Flirc key table with `evtest`, `cec-ctl` against the television, boot time, console bleed. Write `docs/hardware.md`.
-4. Plug in the USB SSD, `lsblk`, `mkfs.ext4 -L channel3` on its partition by hand, note the `PARTUUID`.
+4. Plug in the USB drive (a Seagate Portable 2 TB hard drive, chosen over an SSD at 2026 prices), `lsblk`, `mkfs.ext4 -L channel3` on its partition by hand, note the `PARTUUID`. Set the drive's standby timer to never (`hdparm -S 0 /dev/sda`, or the vendor tool if hdparm is refused) so a long Stand By stretch can never leave it spun down; the broadcast loop otherwise keeps it reading around the clock.
 5. `make pi-setup PI_HOST=channel3.local PI_DISK=/dev/sda1`, then run it again and confirm it reports nothing changed.
 6. Copy the Phase 4 flags into `CHANNEL3_FLAGS` in `/etc/default/channel3`. Run `systemd-analyze verify /etc/systemd/system/channel3.service` on the Pi.
 7. `make deploy PI_HOST=channel3.local`. Confirm the unit is active and the journal shows the Stand By load followed by a schedule load.
