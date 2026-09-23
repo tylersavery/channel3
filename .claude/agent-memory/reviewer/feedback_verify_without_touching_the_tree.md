@@ -1,6 +1,6 @@
 ---
 name: verify-without-touching-the-tree
-description: Prove a pinning test really fails on an algorithm change by using go test -overlay, never by editing the implementation
+description: Use go test -overlay to perturb sources or inject a probe test file, never by editing the implementation
 metadata:
   type: feedback
 ---
@@ -10,3 +10,5 @@ When a phase claims a golden or fixture test pins an algorithm, prove it by pert
 **Why:** The orchestrator lead's reviewer brief says the only writes allowed are the verification report and agent memory. Editing an implementation file to test it, even with the intent to revert, risks leaving the tree dirty before the lead commits, and a `git checkout` to undo it would discard the executor's uncommitted work.
 
 **How to apply:** `sed` the one line into a scratchpad copy, write `{"Replace": {"<abs src>": "<abs copy>"}}`, then `go test -overlay=... -run TestX ./pkg/`. Same idea for any check that needs different source. Build synthetic roots and fixtures in the scratchpad too, never under the repo or [[manual-verification-root]].
+
+The overlay map also **adds** files: name a path that does not exist on disk, such as `<pkg>/zz_probe_test.go`, and point it at a scratchpad file. That gives an in-package test with access to unexported identifiers, which is how to turn a claim into a measurement without a single tree edit. Two uses that paid off in Phase 5: asserting which error value a caller actually receives when a connection dies, where the shipped test only checked `err != nil` and hid a wrong error identity; and counting leaked goroutines by filtering `runtime.Stack(buf, true)` for the package's own frames after N create-and-close cycles, which beats `NumGoroutine()` because test helpers keep their own goroutines alive until cleanup. Reuse the package's existing test helpers rather than rewriting them, and check whether they register a `t.Cleanup` that your loop would fight.

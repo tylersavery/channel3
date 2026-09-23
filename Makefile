@@ -8,7 +8,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X main.version=$(VERSION)
 
 .DEFAULT_GOAL := build
-.PHONY: build build-arm64 test lint run dev-root
+.PHONY: build build-arm64 test lint run dev-root standby-card
 
 build:
 	$(GO) build -ldflags "$(LDFLAGS)" -o bin/channel3 ./cmd/channel3
@@ -33,3 +33,8 @@ run:
 
 dev-root:
 	mkdir -p $(DEV_ROOT)/channels $(DEV_ROOT)/library $(DEV_ROOT)/local
+
+# Redraws the Please Stand By card that is embedded in the binary. The PNG is
+# committed, so this only runs when the card itself changes.
+standby-card:
+	$(GO) run ./tools/standbycard -o internal/player/assets/standby.png
