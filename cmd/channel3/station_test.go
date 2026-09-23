@@ -1198,3 +1198,240 @@ func TestChannelsIsSafeWhileTheListIsReplaced(t *testing.T) {
 		t.Errorf("the station reports %d channels after the rollovers, want %d", got, len(testChannels()))
 	}
 }
+
+// TestZeroChannelsStartsOnStandby is a box whose first ingest has not happened,
+// or whose channel directory is empty. The service comes up, the television
+// shows the card, and nothing is loaded.
+func TestZeroChannelsStartsOnStandby(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	logs := &syncBuffer{}
+
+	s, err := newStation(stationOptions{
+		Player:   p,
+		Clock:    schedule.NewClock(time.UTC),
+		Now:      clock.Now,
+		Reload:   func() ([]schedule.Channel, error) { return nil, nil },
+		Logger:   slog.New(slog.NewTextHandler(logs, nil)),
+		Interval: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("a station with no channels refused to start: %v", err)
+	}
+	if s.Tuned() != "" {
+		t.Errorf("tuned %q, want nothing tuned", s.Tuned())
+	}
+	if got := s.Channels(); len(got) != 0 {
+		t.Errorf("the station reports %d channels, want none", len(got))
+	}
+	if !strings.Contains(logs.String(), "no channels are configured") {
+		t.Errorf("the empty station was not logged:\n%s", logs.String())
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- s.run(ctx) }()
+
+	waitFor(t, func() bool { return p.Standbys() > 0 })
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if got := p.Loads(); len(got) != 0 {
+		t.Errorf("a station with no channels loaded %v", got)
+	}
+}
+
+// TestZeroChannelsIgnoresTheStartChannel keeps --start-channel from turning a
+// box that has not been ingested into a box that will not boot.
+func TestZeroChannelsIgnoresTheStartChannel(t *testing.T) {
+	clock := &fakeClock{now: noon()}
+	logs := &syncBuffer{}
+
+	s, err := newStation(stationOptions{
+		Player:       newFakePlayer(),
+		Clock:        schedule.NewClock(time.UTC),
+		Now:          clock.Now,
+		Reload:       func() ([]schedule.Channel, error) { return nil, nil },
+		StartChannel: "clips",
+		Logger:       slog.New(slog.NewTextHandler(logs, nil)),
+		Interval:     time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("a named start channel on an empty station refused to start: %v", err)
+	}
+	if s.Tuned() != "" {
+		t.Errorf("tuned %q, want nothing tuned", s.Tuned())
+	}
+	if !strings.Contains(logs.String(), "the start channel is not configured yet") {
+		t.Errorf("the dropped start channel was not logged:\n%s", logs.String())
+	}
+}
+
+// TestKeysOnAnEmptyStationDoNothing is somebody pressing buttons at a
+// television that has nothing to show. It must not panic and it must not load.
+func TestKeysOnAnEmptyStationDoNothing(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+
+	s, err := newStation(stationOptions{
+		Player:   p,
+		Clock:    schedule.NewClock(time.UTC),
+		Now:      clock.Now,
+		Reload:   func() ([]schedule.Channel, error) { return nil, nil },
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Interval: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("new station: %v", err)
+	}
+
+	for _, k := range []input.Key{
+		{Action: input.ChannelUp},
+		{Action: input.ChannelDown},
+		{Action: input.Digit, Digit: 5},
+	} {
+		s.key(k)
+	}
+	s.expireDigits()
+
+	if got := p.Loads(); len(got) != 0 {
+		t.Errorf("keys on an empty station loaded %v", got)
+	}
+	if s.Tuned() != "" {
+		t.Errorf("keys on an empty station tuned %q", s.Tuned())
+	}
+}
+
+// TestRolloverAdoptsTheFirstChannels is the box that was ingested while it was
+// broadcasting nothing: the 04:00 rescan finds channels and the lowest numbered
+// one goes on air.
+func TestRolloverAdoptsTheFirstChannels(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: time.Date(2026, 9, 23, 3, 50, 0, 0, time.UTC)}
+	channels := testChannels()
+
+	var scans int
+	s, err := newStation(stationOptions{
+		Player: p,
+		Clock:  schedule.NewClock(time.UTC),
+		Now:    clock.Now,
+		Reload: func() ([]schedule.Channel, error) {
+			scans++
+			if scans == 1 {
+				return nil, nil
+			}
+			return channels, nil
+		},
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Interval: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("new station: %v", err)
+	}
+	if s.Tuned() != "" {
+		t.Fatalf("tuned %q before the rescan, want nothing tuned", s.Tuned())
+	}
+
+	clock.Advance(20 * time.Minute)
+	s.reconcile()
+
+	if s.Tuned() != "clips" {
+		t.Errorf("tuned %q after the rollover, want the lowest numbered channel", s.Tuned())
+	}
+	want := wantSlot(t, channels[0], clock.Now())
+	got := p.LastLoad(t)
+	if got.Path != want.Item.Path || got.Offset != want.Offset {
+		t.Errorf("loaded %s at %s, want %s at %s", got.Path, got.Offset, want.Item.Path, want.Offset)
+	}
+}
+
+// TestPlayableChannelsAppliesTheDaysExclusions is the guide agreeing with the
+// screen. Channels reports the library as it was loaded; the API reads
+// PlayableChannels, which is the order the television is really playing.
+func TestPlayableChannelsAppliesTheDaysExclusions(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	channels := testChannels()
+	s := newTestStation(t, p, clock, "clips", channels)
+
+	s.play()
+	broken := p.LastLoad(t).Path
+	brokenID := itemIDForPath(t, channels[0], broken)
+	s.handle(player.Event{Kind: player.EndFile, Reason: player.ReasonError, Path: broken})
+
+	playable := s.PlayableChannels()
+	if len(playable) != len(channels) {
+		t.Fatalf("PlayableChannels returned %d channels, want %d", len(playable), len(channels))
+	}
+	for _, item := range playable[0].Items {
+		if item.ID == brokenID {
+			t.Errorf("PlayableChannels still lists the excluded item %s", brokenID)
+		}
+	}
+	if got, want := len(playable[0].Items), len(channels[0].Items)-1; got != want {
+		t.Errorf("PlayableChannels kept %d items, want %d", got, want)
+	}
+
+	// Channels is the library as it was loaded and is not filtered, so the two
+	// views stay distinguishable.
+	loaded := s.Channels()
+	if len(loaded[0].Items) != len(channels[0].Items) {
+		t.Errorf("Channels reports %d items, want the whole channel's %d",
+			len(loaded[0].Items), len(channels[0].Items))
+	}
+
+	// The channel the exclusion belongs to is the only one that loses an item.
+	if len(playable[1].Items) != len(channels[1].Items) {
+		t.Errorf("an exclusion on one channel changed another: %+v", playable[1].Items)
+	}
+}
+
+// TestPlayableChannelsIsSafeWhileItemsAreExcluded is the API reading the
+// station from the HTTP server's goroutines while the broadcast loop drops an
+// unplayable item.
+//
+// It is a race detector test: run it with -race, which is what make test does.
+func TestPlayableChannelsIsSafeWhileItemsAreExcluded(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	channels := testChannels()
+	s := newTestStation(t, p, clock, "clips", channels)
+
+	stop := make(chan struct{})
+	readers := sync.WaitGroup{}
+	for range 4 {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				for _, ch := range s.PlayableChannels() {
+					for _, item := range ch.Items {
+						_ = item.ID + item.Path
+					}
+				}
+			}
+		}()
+	}
+
+	// Exclude and forgive repeatedly, which is an error event and a rollover
+	// writing the same map the readers above are walking.
+	for range 50 {
+		s.play()
+		s.handle(player.Event{Kind: player.EndFile, Reason: player.ReasonError, Path: p.LastLoad(t).Path})
+		s.rollover(s.clock.BroadcastDay(clock.Now()))
+	}
+
+	close(stop)
+	readers.Wait()
+
+	if got := len(s.PlayableChannels()); got != len(channels) {
+		t.Errorf("the station reports %d channels, want %d", got, len(channels))
+	}
+}

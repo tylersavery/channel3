@@ -123,7 +123,13 @@ func itemFromSidecar(channelID, dir string, s Sidecar) (Item, bool) {
 
 	path := s.File
 	if !filepath.IsAbs(path) {
-		path = filepath.Join(dir, path)
+		resolved, ok := insideChannelDir(dir, path)
+		if !ok {
+			slog.Warn("excluding item: sidecar file escapes the channel directory",
+				"channel", channelID, "id", s.ID, "file", s.File, "dir", dir)
+			return Item{}, false
+		}
+		path = resolved
 	}
 	info, err := os.Stat(path)
 	switch {
@@ -152,6 +158,27 @@ func itemFromSidecar(channelID, dir string, s Sidecar) (Item, bool) {
 		Duration: durationFromSeconds(s.Duration),
 		Source:   s.Source,
 	}, true
+}
+
+// insideChannelDir resolves a relative sidecar file against its channel
+// directory and reports whether it stayed there.
+//
+// A sidecar is a file on disk and its "file" field is not validated by anything
+// upstream, so a hand written or damaged one naming ../../something would
+// otherwise put an arbitrary file on a children's television. Only a path that
+// is still under the channel directory is played. An absolute path, which is
+// what a file:// source records, never reaches here: those are deliberate and
+// point at media that was never copied into the library.
+func insideChannelDir(dir, file string) (string, bool) {
+	resolved := filepath.Join(dir, file)
+	rel, err := filepath.Rel(dir, resolved)
+	if err != nil {
+		return "", false
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return resolved, true
 }
 
 // durationFromSeconds converts a sidecar's float seconds to a Duration, rounding

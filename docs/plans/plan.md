@@ -144,10 +144,13 @@ Touch:
   "source": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
   "file": "dQw4w9WgXcQ.mp4",
   "duration": 612.437,
+  "size": 123456789,
   "ingested_at": "2026-09-23T02:11:00Z",
   "status": "ok"
 }
 ```
+
+`size` is the file's length in bytes and was added in the final review so that a clip replaced under the same name is ingested again instead of keeping its stale duration.
 
 A failed item keeps `id`, `source`, `status: "failed"`, `error` (first line of the tool's stderr), and `attempted_at`. No `file`, no `duration`.
 

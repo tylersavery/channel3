@@ -17,6 +17,17 @@ import (
 // something ffprobe can read.
 const tinyMP4 = "tiny.mp4"
 
+// tinyMP4Size is the fixture clip's length in bytes, which is the size an
+// ingested sidecar should record.
+func tinyMP4Size(t *testing.T) int64 {
+	t.Helper()
+	info, err := os.Stat(filepath.Join("testdata", tinyMP4))
+	if err != nil {
+		t.Fatalf("stat %s: %v", tinyMP4, err)
+	}
+	return info.Size()
+}
+
 // copyTinyMP4 writes the fixture clip to dest, creating its directory.
 func copyTinyMP4(t *testing.T, dest string) {
 	t.Helper()
@@ -209,6 +220,7 @@ func TestIngestSingleVideo(t *testing.T) {
 		Source:   source,
 		File:     "zulu001.mp4",
 		Duration: 612.437,
+		Size:     tinyMP4Size(t),
 		Status:   StatusOK,
 	}
 	ingestedAt := got.IngestedAt
@@ -1031,4 +1043,136 @@ func names(entries []os.DirEntry) []string {
 		out = append(out, entry.Name())
 	}
 	return out
+}
+
+// TestIngestReprobesALocalFileThatChanged is somebody dropping a longer cut of
+// a video in under the same name. The sidecar's duration would otherwise stay
+// on the old length and every schedule boundary after it would be wrong.
+func TestIngestReprobesALocalFileThatChanged(t *testing.T) {
+	captureLogs(t)
+	f := newIngestFixture(t)
+	local := filepath.Join(t.TempDir(), "Steam Engines.mp4")
+	copyTinyMP4(t, local)
+	f.prober.seconds[local] = 90.25
+
+	source := "file://" + local
+	if _, err := f.run(trainsChannel(source)); err != nil {
+		t.Fatalf("first Ingest: %v", err)
+	}
+	first := f.sidecar(t, "trains", "steam-engines")
+	if first.Size != tinyMP4Size(t) {
+		t.Fatalf("size = %d, want the file's %d", first.Size, tinyMP4Size(t))
+	}
+
+	// The file is replaced with a longer one.
+	data, err := os.ReadFile(local)
+	if err != nil {
+		t.Fatalf("read the local file: %v", err)
+	}
+	if err := os.WriteFile(local, append(data, data...), 0o644); err != nil {
+		t.Fatalf("grow the local file: %v", err)
+	}
+
+	second := newIngestFixture(t)
+	second.root = f.root
+	second.prober.seconds[local] = 181.5
+
+	report, err := second.run(trainsChannel(source))
+	if err != nil {
+		t.Fatalf("second Ingest: %v", err)
+	}
+	if report != (Report{OK: 1}) {
+		t.Errorf("report = %+v, want the changed file ingested again", report)
+	}
+	if len(second.prober.calls) != 1 {
+		t.Errorf("the changed file was probed %d times, want once", len(second.prober.calls))
+	}
+
+	got := second.sidecar(t, "trains", "steam-engines")
+	if got.Duration != 181.5 {
+		t.Errorf("duration = %v, want the new length 181.5", got.Duration)
+	}
+	if want := int64(len(data) * 2); got.Size != want {
+		t.Errorf("size = %d, want the new size %d", got.Size, want)
+	}
+}
+
+// TestIngestDownloadsAgainWhenTheFileChanged is the same check for a remote
+// item: a truncated or replaced download is fetched again rather than kept.
+func TestIngestDownloadsAgainWhenTheFileChanged(t *testing.T) {
+	captureLogs(t)
+	f := newIngestFixture(t)
+	const source = "https://www.youtube.com/watch?v=zulu001"
+	f.runner.entries[source] = []Entry{{ID: "zulu001", URL: source, Title: "Steam Engines"}}
+	f.runner.titles[source] = "Steam Engines"
+
+	if _, err := f.run(trainsChannel(source)); err != nil {
+		t.Fatalf("first Ingest: %v", err)
+	}
+
+	// The download was cut short, which leaves a playable file of the wrong
+	// length rather than no file at all.
+	media := filepath.Join(ChannelDir(f.root, "trains"), "zulu001.mp4")
+	if err := os.Truncate(media, 1024); err != nil {
+		t.Fatalf("truncate the download: %v", err)
+	}
+
+	second := newIngestFixture(t)
+	second.root = f.root
+	second.runner.entries[source] = f.runner.entries[source]
+	second.runner.titles[source] = "Steam Engines"
+
+	report, err := second.run(trainsChannel(source))
+	if err != nil {
+		t.Fatalf("second Ingest: %v", err)
+	}
+	if report != (Report{OK: 1}) {
+		t.Errorf("report = %+v, want the changed item downloaded again", report)
+	}
+	if got := second.runner.downloads(); len(got) != 1 {
+		t.Errorf("downloads = %v, want the changed item fetched again", got)
+	}
+	if got := second.sidecar(t, "trains", "zulu001"); got.Size != tinyMP4Size(t) {
+		t.Errorf("size = %d, want the redownloaded file's %d", got.Size, tinyMP4Size(t))
+	}
+}
+
+// TestIngestSkipsASidecarWithNoSize covers every library written before the
+// size field existed. There is nothing to compare, so the item is skipped
+// exactly as it always was rather than downloaded again on the next run.
+func TestIngestSkipsASidecarWithNoSize(t *testing.T) {
+	captureLogs(t)
+	f := newIngestFixture(t)
+	const source = "https://www.youtube.com/watch?v=zulu001"
+	f.runner.entries[source] = []Entry{{ID: "zulu001", URL: source, Title: "Steam Engines"}}
+
+	dir := ChannelDir(f.root, "trains")
+	copyTinyMP4(t, filepath.Join(dir, "zulu001.mp4"))
+	ingested := fixedTime()()
+	err := WriteSidecar(filepath.Join(dir, "zulu001.json"), Sidecar{
+		ID:         "zulu001",
+		Title:      "Steam Engines",
+		Source:     source,
+		File:       "zulu001.mp4",
+		Duration:   612.437,
+		IngestedAt: &ingested,
+		Status:     StatusOK,
+	})
+	if err != nil {
+		t.Fatalf("WriteSidecar: %v", err)
+	}
+
+	report, err := f.run(trainsChannel(source))
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if report != (Report{Skipped: 1}) {
+		t.Errorf("report = %+v, want one skip", report)
+	}
+	if got := f.runner.downloads(); len(got) != 0 {
+		t.Errorf("a sidecar with no size was downloaded again: %v", got)
+	}
+	if got := f.sidecar(t, "trains", "zulu001"); got.Size != 0 {
+		t.Errorf("the skipped sidecar was rewritten with size %d", got.Size)
+	}
 }

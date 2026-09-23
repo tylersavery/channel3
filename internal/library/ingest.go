@@ -317,6 +317,10 @@ func (r *ingestRun) ingestEntry(ch Channel, dir, source string, entry Entry) err
 	if err != nil {
 		return r.fail(ch, dir, entry.ID, entry.URL, err)
 	}
+	size, err := fileSize(result.Path)
+	if err != nil {
+		return r.fail(ch, dir, entry.ID, entry.URL, err)
+	}
 
 	title := result.Title
 	if title == "" {
@@ -334,6 +338,7 @@ func (r *ingestRun) ingestEntry(ch Channel, dir, source string, entry Entry) err
 		Source:   entry.URL,
 		File:     file,
 		Duration: duration,
+		Size:     size,
 	})
 }
 
@@ -371,12 +376,17 @@ func (r *ingestRun) ingestLocal(ch Channel, dir, source string) error {
 	if err != nil {
 		return r.fail(ch, dir, id, source, err)
 	}
+	size, err := fileSize(path)
+	if err != nil {
+		return r.fail(ch, dir, id, source, err)
+	}
 	return r.writeOK(ch, dir, Sidecar{
 		ID:       id,
 		Title:    stem(path),
 		Source:   source,
 		File:     path,
 		Duration: duration,
+		Size:     size,
 	})
 }
 
@@ -446,8 +456,14 @@ func (r *ingestRun) fail(ch Channel, dir, id, source string, cause error) error 
 }
 
 // alreadyIngested reports whether this item can be left alone: an ok sidecar
-// whose file is still on disk. A failed sidecar is retried, and so is an ok one
-// whose file has gone.
+// whose file is still on disk, at the size it was ingested at. A failed sidecar
+// is retried, and so is an ok one whose file has gone or has changed.
+//
+// The size check is what notices a replaced clip. Somebody who drops a longer
+// cut of a local video in under the same name would otherwise keep the old
+// duration in the sidecar, and every schedule boundary after that item on that
+// channel would be wrong for the rest of the day. A sidecar written before size
+// was recorded has none, and is skipped as it always was.
 func (r *ingestRun) alreadyIngested(dir, id string) bool {
 	path, err := r.sidecarPath(dir, id)
 	if err != nil {
@@ -464,7 +480,27 @@ func (r *ingestRun) alreadyIngested(dir, id string) bool {
 	if !filepath.IsAbs(media) {
 		media = filepath.Join(dir, media)
 	}
-	return isRegularFile(media)
+	info, err := os.Stat(media)
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	if sidecar.Size > 0 && sidecar.Size != info.Size() {
+		slog.Info("the file has changed since it was ingested, ingesting it again",
+			"id", id, "path", media, "ingested size", sidecar.Size, "size now", info.Size())
+		return false
+	}
+	return true
+}
+
+// fileSize is the length of a file that has just been probed. A stat that fails
+// here means the file went away between the probe and the sidecar, which is a
+// failed item rather than a sidecar with no size in it.
+func fileSize(path string) (int64, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, fmt.Errorf("measure %s: %w", path, err)
+	}
+	return info.Size(), nil
 }
 
 // sidecarPath is where one item's sidecar lives.

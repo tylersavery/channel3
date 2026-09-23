@@ -1,0 +1,9 @@
+{
+  "id": "escape005",
+  "title": "Not In This Channel",
+  "source": "https://example.com/watch?v=escape005",
+  "file": "../../escape.mp4",
+  "duration": 120.5,
+  "ingested_at": "2026-09-23T02:11:00Z",
+  "status": "ok"
+}

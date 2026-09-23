@@ -142,14 +142,29 @@ func newStation(opts stationOptions) (*station, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(channels) == 0 {
-		return nil, fmt.Errorf("station: no channels are configured")
-	}
 	s.setChannels(channels)
 	s.day = s.clock.BroadcastDay(s.now())
 
+	// A station with nothing configured still starts. The television shows the
+	// card, the guide answers with an empty list, and the next rollover or
+	// rescan adopts whatever has appeared since. Refusing to start would leave
+	// an appliance whose first ingest has not happened yet with no service at
+	// all, and no way to see that from a phone.
+	if len(channels) == 0 {
+		log.Warn("no channels are configured, showing stand by")
+	}
+
 	if err := s.tune(opts.StartChannel); err != nil {
-		return nil, err
+		if len(channels) > 0 {
+			return nil, err
+		}
+		// There is nothing to tune yet, so a named start channel is not wrong,
+		// only early. It is dropped rather than remembered: the lowest numbered
+		// channel is tuned when channels appear, exactly as a bare serve does.
+		log.Warn("the start channel is not configured yet", "channel", opts.StartChannel, "error", err)
+		if err := s.tune(""); err != nil {
+			return nil, err
+		}
 	}
 	return s, nil
 }
@@ -159,6 +174,12 @@ func newStation(opts stationOptions) (*station, error) {
 func (s *station) tune(id string) error {
 	s.stalled = false
 	if id == "" {
+		if len(s.channels) == 0 {
+			// Nothing to tune. The station stays on the card and the tuner is
+			// still rebuilt, so a key press is a no-op rather than a panic.
+			s.setTuned("")
+			return nil
+		}
 		// loadStation sorts by number, so the first is the lowest.
 		s.setTuned(s.channels[0].ID)
 		return nil
@@ -202,6 +223,25 @@ func (s *station) Channels() []schedule.Channel {
 	defer s.mu.RUnlock()
 	out := make([]schedule.Channel, len(s.channels))
 	copy(out, s.channels)
+	return out
+}
+
+// PlayableChannels is the channel list as the broadcast loop sees it: today's
+// exclusions already removed.
+//
+// This is what the API answers from, so the guide and the screen agree about
+// what is on. An item mpv could not open is not part of today's order on the
+// television, and it must not be part of it in the guide either.
+//
+// Both the list and the exclusions are read under the same lock the loop writes
+// them under, so a request arriving mid rollover sees one consistent station.
+func (s *station) PlayableChannels() []schedule.Channel {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]schedule.Channel, 0, len(s.channels))
+	for _, ch := range s.channels {
+		out = append(out, s.playable(ch))
+	}
 	return out
 }
 
@@ -493,10 +533,16 @@ func (s *station) exclude(path string) bool {
 		s.log.Warn("an unplayable file is not on the tuned channel", "path", path, "channel", s.tuned)
 		return false
 	}
+	// The loop is the only writer, but the API reads the exclusions through
+	// PlayableChannels from the HTTP server's goroutines, so the write is
+	// guarded even though nothing competes with it.
+	s.mu.Lock()
 	if s.excluded[s.tuned] == nil {
 		s.excluded[s.tuned] = make(map[string]bool)
 	}
 	s.excluded[s.tuned][item.ID] = true
+	s.mu.Unlock()
+
 	s.log.Warn("dropping an unplayable item for the rest of the day",
 		"channel", s.tuned, "item", item.ID, "title", item.Title, "path", item.Path)
 	return true
@@ -533,6 +579,14 @@ func (s *station) repeatingFailure() bool {
 // play asks the schedule what the tuned channel is airing and loads it.
 func (s *station) play() {
 	now := s.now()
+	if len(s.channels) == 0 {
+		// A station with nothing configured. This is a normal state on a box
+		// whose first ingest has not happened, so it is a stand by card and a
+		// log line rather than a failure.
+		s.log.Info("no channels are configured, showing stand by")
+		s.standbyOrLog()
+		return
+	}
 	channel, ok := s.channel(s.tuned)
 	if !ok {
 		s.log.Error("the tuned channel is gone", "channel", s.tuned)
@@ -595,6 +649,12 @@ func (s *station) reconcile() {
 		return
 	}
 
+	if len(s.channels) == 0 {
+		// The card is already up and there is nothing to reconcile it against.
+		// Channels are adopted at the next rollover, which is the one moment
+		// the library is rescanned.
+		return
+	}
 	channel, ok := s.channel(s.tuned)
 	if !ok {
 		s.play()
@@ -632,7 +692,9 @@ func (s *station) reconcile() {
 // channels, forgive every item that failed yesterday and play the new order.
 func (s *station) rollover(day time.Time) {
 	s.log.Info("broadcast day rollover, rescanning the library", "day", day.Format(time.RFC3339))
+	s.mu.Lock()
 	s.excluded = make(map[string]map[string]bool)
+	s.mu.Unlock()
 
 	// The day is advanced only once the rescan has worked. A library that is
 	// briefly unreadable at 04:00 is then retried on the next reconcile tick
@@ -654,7 +716,11 @@ func (s *station) rollover(day time.Time) {
 	s.day = day
 
 	if _, ok := s.channel(s.tuned); !ok {
-		s.log.Warn("the tuned channel is no longer configured, tuning the lowest", "channel", s.tuned)
+		if s.tuned == "" {
+			s.log.Info("the rescan found channels, tuning the lowest", "channels", len(channels))
+		} else {
+			s.log.Warn("the tuned channel is no longer configured, tuning the lowest", "channel", s.tuned)
+		}
 		if err := s.tune(""); err != nil {
 			s.log.Error("could not tune a channel after the rescan", "error", err)
 		}
@@ -681,6 +747,10 @@ func (s *station) channel(id string) (schedule.Channel, bool) {
 // Removing an item changes the day's order for the whole channel, which is what
 // the plan asks for: a file that cannot be played is not part of today's
 // broadcast at all.
+//
+// It reads s.excluded and takes no lock of its own. The loop calls it directly,
+// and PlayableChannels calls it holding the read lock; both are safe because
+// every write to the map happens under the write lock.
 func (s *station) playable(ch schedule.Channel) schedule.Channel {
 	excluded := s.excluded[ch.ID]
 	if len(excluded) == 0 {

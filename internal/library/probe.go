@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"strconv"
 	"time"
+
+	"github.com/tylersavery/channel3/internal/proc"
 )
 
 // Prober reports the exact duration of a media file, in seconds.
@@ -55,6 +57,9 @@ func (f FFProbe) DurationSeconds(path string) (float64, error) {
 	cmd := exec.CommandContext(ctx, bin, "-v", "error", "-show_entries", "format=duration", "-of", "json", path)
 	cmd.Stdout = &stdout
 	cmd.Stderr = stderr
+	// A probe of a damaged file can leave a child behind. The whole group goes
+	// when the deadline does, or the timeout would not bound anything.
+	proc.Harden(cmd)
 
 	if err := cmd.Run(); err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {

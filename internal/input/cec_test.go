@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -155,5 +157,35 @@ func assertCalls(t *testing.T, got, want []string) {
 		if got[i] != want[i] {
 			t.Errorf("command %d is %q, want %q", i, got[i], want[i])
 		}
+	}
+}
+
+// TestExecRunnerKillsTheWholeProcessTree is the real runner against a command
+// that forks and then hangs, which is what cec-ctl waiting on a television that
+// never answers looks like.
+//
+// Killing only the process that was started leaves the child holding the output
+// pipe, and the deadline then bounds nothing: the button press blocks the
+// television worker for as long as the child takes. The whole group has to go.
+func TestExecRunnerKillsTheWholeProcessTree(t *testing.T) {
+	sleeper := filepath.Join(t.TempDir(), "sleeping-cec-ctl")
+	if err := os.WriteFile(sleeper, []byte("#!/bin/sh\nsleep 30 &\nwait\n"), 0o755); err != nil {
+		t.Fatalf("write the sleeper: %v", err)
+	}
+
+	// Long enough that the script has certainly forked its child, so the test
+	// exercises the process group rather than a single process.
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+
+	started := time.Now()
+	err := execRunner{}.Run(ctx, sleeper)
+	took := time.Since(started)
+
+	if err == nil {
+		t.Fatal("a command that was killed at its deadline was reported as a success")
+	}
+	if took > 2*time.Second {
+		t.Errorf("the runner took %s to give up, want the deadline to take the whole process tree", took)
 	}
 }

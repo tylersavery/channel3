@@ -2,7 +2,6 @@ package library
 
 import (
 	"errors"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -120,16 +119,17 @@ func TestFFProbeReportsAnUnreadableFile(t *testing.T) {
 // TestFFProbeTimesOut proves a probe that never returns becomes a failed item
 // rather than a hang, and that the recorded reason names the timeout.
 func TestFFProbeTimesOut(t *testing.T) {
-	sleeper := filepath.Join(t.TempDir(), "sleeping-ffprobe")
-	if err := os.WriteFile(sleeper, []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
-		t.Fatalf("write the sleeper: %v", err)
-	}
+	sleeper := sleepBinary(t)
 
-	_, err := FFProbe{Path: sleeper, Timeout: 50 * time.Millisecond}.DurationSeconds("whatever.mp4")
+	started := time.Now()
+	_, err := FFProbe{Path: sleeper, Timeout: stuckTimeout}.DurationSeconds("whatever.mp4")
 	if err == nil {
 		t.Fatal("DurationSeconds waited for a binary that never returns")
 	}
-	if !strings.Contains(err.Error(), "timed out after 50ms") {
+	if took := time.Since(started); took > killedWithin {
+		t.Errorf("DurationSeconds took %s to give up, want the deadline to take the whole process tree", took)
+	}
+	if !strings.Contains(err.Error(), "timed out after 250ms") {
 		t.Errorf("error %q does not name the timeout", err)
 	}
 	if !strings.Contains(err.Error(), "whatever.mp4") {

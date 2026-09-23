@@ -24,7 +24,7 @@ YTDLP_URL="${YTDLP_RELEASE}/${YTDLP_ASSET}"
 YTDLP_SUMS_URL="${YTDLP_RELEASE}/SHA2-256SUMS"
 YTDLP_PATH="/usr/local/bin/yt-dlp"
 
-APT_PACKAGES=(mpv v4l-utils ffmpeg)
+APT_PACKAGES=(mpv v4l-utils ffmpeg rsync)
 SERVICE_USER="channel3"
 SERVICE_GROUPS=(video render input audio)
 ROOT_DIR="/srv/channel3"

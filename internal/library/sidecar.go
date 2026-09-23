@@ -25,20 +25,23 @@ const (
 // This schema is a contract. Ingest writes it, the index reads it, and changing
 // a field name invalidates every library already on disk.
 //
-// An ok sidecar carries id, title, source, file, duration, ingested_at and
-// status. A failed one carries id, source, status, error and attempted_at, and
-// nothing else: there is no file and no duration to record.
+// An ok sidecar carries id, title, source, file, duration, size, ingested_at
+// and status. A failed one carries id, source, status, error and attempted_at,
+// and nothing else: there is no file and no duration to record.
 //
 // File is relative to the sidecar's own directory for anything that was
 // downloaded, and absolute for a file:// source, which is never copied.
 // Duration is seconds as a float, exact enough that cumulative schedule
-// boundaries do not drift. Times are RFC 3339 in UTC.
+// boundaries do not drift. Size is the file's length in bytes at ingest, which
+// is how a replaced file is noticed: a sidecar whose size no longer matches the
+// file is stale and the item is ingested again. Times are RFC 3339 in UTC.
 type Sidecar struct {
 	ID          string     `json:"id"`
 	Title       string     `json:"title,omitempty"`
 	Source      string     `json:"source"`
 	File        string     `json:"file,omitempty"`
 	Duration    float64    `json:"duration,omitempty"`
+	Size        int64      `json:"size,omitempty"`
 	IngestedAt  *time.Time `json:"ingested_at,omitempty"`
 	Status      Status     `json:"status"`
 	Error       string     `json:"error,omitempty"`

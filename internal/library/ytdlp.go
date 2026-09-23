@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/tylersavery/channel3/internal/proc"
 )
 
 // Entry is one video found by expanding a source URL. A plain video URL expands
@@ -186,6 +188,9 @@ func (y YTDLP) run(timeout time.Duration, args []string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = stderr
+	// yt-dlp starts ffmpeg to merge a download. Without this the deadline kills
+	// yt-dlp alone and Run waits on the pipes ffmpeg inherited.
+	proc.Harden(cmd)
 
 	if err := cmd.Run(); err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tylersavery/channel3/internal/proc"
 )
 
 // cecTimeout is how long one cec-ctl invocation may take.
@@ -51,7 +53,12 @@ type execRunner struct{}
 // Run executes the command and folds its output into the error, because
 // cec-ctl explains itself on stdout rather than in its exit status.
 func (execRunner) Run(ctx context.Context, name string, args ...string) error {
-	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, name, args...)
+	// cec-ctl against a television that never answers is exactly the case this
+	// deadline exists for, so the deadline has to take the whole process group
+	// rather than leave a child holding the output pipe.
+	proc.Harden(cmd)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		text := strings.TrimSpace(string(out))
 		if text == "" {

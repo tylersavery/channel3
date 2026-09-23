@@ -71,6 +71,9 @@ func TestSidecarOKFields(t *testing.T) {
 	if sidecar.Duration != 612.437 {
 		t.Errorf("duration = %v", sidecar.Duration)
 	}
+	if sidecar.Size != 123456789 {
+		t.Errorf("size = %v", sidecar.Size)
+	}
 	if sidecar.Status != StatusOK {
 		t.Errorf("status = %q", sidecar.Status)
 	}
@@ -97,8 +100,8 @@ func TestSidecarFailedFields(t *testing.T) {
 	if sidecar.AttemptedAt == nil || !sidecar.AttemptedAt.Equal(*mustTime(t, "2026-09-23T02:12:30Z")) {
 		t.Errorf("attempted_at = %v", sidecar.AttemptedAt)
 	}
-	if sidecar.File != "" || sidecar.Duration != 0 || sidecar.IngestedAt != nil {
-		t.Errorf("a failed sidecar carries no file, duration or ingest time: %+v", sidecar)
+	if sidecar.File != "" || sidecar.Duration != 0 || sidecar.Size != 0 || sidecar.IngestedAt != nil {
+		t.Errorf("a failed sidecar carries no file, duration, size or ingest time: %+v", sidecar)
 	}
 }
 
@@ -116,7 +119,7 @@ func TestFailedSidecarOmitsSuccessFields(t *testing.T) {
 		t.Fatalf("MarshalSidecar: %v", err)
 	}
 
-	for _, absent := range []string{`"file"`, `"duration"`, `"title"`, `"ingested_at"`} {
+	for _, absent := range []string{`"file"`, `"duration"`, `"size"`, `"title"`, `"ingested_at"`} {
 		if strings.Contains(string(data), absent) {
 			t.Errorf("failed sidecar contains %s:\n%s", absent, data)
 		}
@@ -187,6 +190,7 @@ func TestWriteAndReadSidecar(t *testing.T) {
 		Source:     "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
 		File:       "dQw4w9WgXcQ.mp4",
 		Duration:   612.437,
+		Size:       123456789,
 		IngestedAt: mustTime(t, "2026-09-23T02:11:00Z"),
 		Status:     StatusOK,
 	}

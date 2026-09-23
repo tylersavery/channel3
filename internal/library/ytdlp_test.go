@@ -301,20 +301,28 @@ func TestYTDLPTimesOut(t *testing.T) {
 	captureLogs(t)
 	sleeper := sleepBinary(t)
 
-	_, err := YTDLP{Path: sleeper, ExpandTimeout: 50 * time.Millisecond}.Expand("https://example.com/a")
+	started := time.Now()
+	_, err := YTDLP{Path: sleeper, ExpandTimeout: stuckTimeout}.Expand("https://example.com/a")
 	if err == nil {
 		t.Fatal("Expand waited for a binary that never returns")
 	}
-	if !strings.Contains(err.Error(), "timed out after 50ms") {
+	if !strings.Contains(err.Error(), "timed out after 250ms") {
 		t.Errorf("error %q does not name the timeout", err)
 	}
+	if took := time.Since(started); took > killedWithin {
+		t.Errorf("Expand took %s to give up, want the deadline to take the whole process tree", took)
+	}
 
-	_, err = YTDLP{Path: sleeper, DownloadTimeout: 50 * time.Millisecond}.Download("https://example.com/a", t.TempDir())
+	started = time.Now()
+	_, err = YTDLP{Path: sleeper, DownloadTimeout: stuckTimeout}.Download("https://example.com/a", t.TempDir())
 	if err == nil {
 		t.Fatal("Download waited for a binary that never returns")
 	}
-	if !strings.Contains(err.Error(), "timed out after 50ms") {
+	if !strings.Contains(err.Error(), "timed out after 250ms") {
 		t.Errorf("error %q does not name the timeout", err)
+	}
+	if took := time.Since(started); took > killedWithin {
+		t.Errorf("Download took %s to give up, want the deadline to take the whole process tree", took)
 	}
 }
 
@@ -363,16 +371,40 @@ func TestParseDownloadRejectsAnUnsafeID(t *testing.T) {
 	}
 }
 
-// sleepBinary writes a tiny script that never returns in the time a test waits.
+// sleepBinary writes a tiny script that never returns in the time a test waits,
+// and that leaves a grandchild holding the output pipes when it is killed.
+//
+// The grandchild is the whole point. A tool that forks, which yt-dlp does to
+// merge a download and ffprobe can do on a damaged file, hands its own stdout
+// and stderr to the child. Killing only the process that was started leaves
+// those pipes open and Wait blocks on them until the child finishes by itself,
+// so the timeout bounds nothing. This script reproduces that exactly: the
+// background sleep outlives the shell unless the whole process group is killed.
 func sleepBinary(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "sleeper")
-	script := "#!/bin/sh\nsleep 30\n"
+	script := "#!/bin/sh\nsleep 30 &\nwait\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write the sleeper: %v", err)
 	}
 	return path
 }
+
+// stuckTimeout is the deadline the timeout tests give a tool that never
+// returns.
+//
+// It has to outlast the sleeper forking its grandchild. A deadline of a few
+// milliseconds can land before the fork, and the test would then prove only
+// that a single process can be killed, which was never the bug.
+const stuckTimeout = 250 * time.Millisecond
+
+// killedWithin is how long a call whose deadline has passed may still take.
+//
+// Killing the process group ends it in milliseconds. This bound is loose enough
+// for a busy machine and still well under the two second WaitDelay that would
+// be reached if the group kill ever stopped working, so a regression fails here
+// rather than passing slowly.
+const killedWithin = 2 * time.Second
 
 // TestDefaultFormatCapsAt1080pH264 keeps the one decision the Pi depends on
 // visible: anything but H.264 at 1080p or below will not play smoothly.

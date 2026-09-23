@@ -264,3 +264,100 @@ func TestChannelDir(t *testing.T) {
 		t.Errorf("ChannelsDir = %q, want %q", got, want)
 	}
 }
+
+// TestScanExcludesASidecarThatEscapesItsChannel covers a hand written or
+// damaged sidecar naming a file outside the library. The item is dropped with
+// that reason rather than silently resolved.
+func TestScanExcludesASidecarThatEscapesItsChannel(t *testing.T) {
+	logs := captureLogs(t)
+
+	index, err := Scan("testdata", fixtureChannels())
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+
+	for _, item := range index.Items("trains") {
+		if item.ID == "escape005" {
+			t.Errorf("an item whose file escapes the channel directory was played: %+v", item)
+		}
+	}
+	if !strings.Contains(logs.String(), "escapes the channel directory") {
+		t.Errorf("the escaping sidecar was not logged with that reason:\n%s", logs.String())
+	}
+}
+
+// TestScanExcludesAnEscapingFileThatExists is the same check against a file
+// that is really there, so the exclusion cannot be credited to the file being
+// missing.
+func TestScanExcludesAnEscapingFileThatExists(t *testing.T) {
+	logs := captureLogs(t)
+
+	root := t.TempDir()
+	channelDir := ChannelDir(root, "trains")
+	if err := os.MkdirAll(channelDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	outside := filepath.Join(root, "outside.mp4")
+	if err := os.WriteFile(outside, []byte("not for the television"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	err := WriteSidecar(filepath.Join(channelDir, "escaping.json"), Sidecar{
+		ID:         "escaping",
+		Title:      "Outside The Library",
+		Source:     "https://example.com/outside",
+		File:       filepath.Join("..", "..", "outside.mp4"),
+		Duration:   90,
+		IngestedAt: mustTime(t, "2026-09-23T02:11:00Z"),
+		Status:     StatusOK,
+	})
+	if err != nil {
+		t.Fatalf("WriteSidecar: %v", err)
+	}
+
+	index, err := Scan(root, []Channel{{ID: "trains", Number: 3, Name: "Train TV"}})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if got := len(index.Items("trains")); got != 0 {
+		t.Fatalf("got %d items, want the escaping one excluded: %+v", got, index.Items("trains"))
+	}
+	if !strings.Contains(logs.String(), "escapes the channel directory") {
+		t.Errorf("the escaping sidecar was not logged with that reason:\n%s", logs.String())
+	}
+}
+
+// TestScanKeepsAFileInASubdirectory guards the containment check from being too
+// strict: a relative path that stays inside the channel is still played.
+func TestScanKeepsAFileInASubdirectory(t *testing.T) {
+	captureLogs(t)
+
+	root := t.TempDir()
+	channelDir := ChannelDir(root, "trains")
+	nested := filepath.Join(channelDir, "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "clip.mp4"), []byte("clip"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	err := WriteSidecar(filepath.Join(channelDir, "nested.json"), Sidecar{
+		ID:         "nested",
+		Title:      "In A Subdirectory",
+		Source:     "https://example.com/nested",
+		File:       filepath.Join("nested", "clip.mp4"),
+		Duration:   90,
+		IngestedAt: mustTime(t, "2026-09-23T02:11:00Z"),
+		Status:     StatusOK,
+	})
+	if err != nil {
+		t.Fatalf("WriteSidecar: %v", err)
+	}
+
+	index, err := Scan(root, []Channel{{ID: "trains", Number: 3, Name: "Train TV"}})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if got := len(index.Items("trains")); got != 1 {
+		t.Fatalf("got %d items, want the nested file kept", got)
+	}
+}

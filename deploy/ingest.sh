@@ -13,6 +13,10 @@
 # Ingesting on the Mac into ~/srv/channel3 and rsyncing the library to the Pi is
 # the no-downtime route.
 #
+# Stopping the service is announced and then waited on for a few seconds, so an
+# ingest started in the middle of a programme can still be called off. Set
+# CHANNEL3_YES=1 to skip the wait.
+#
 # Starting the service again rescans the library, so the new items are on air
 # right away rather than at the next 04:00 rollover.
 #
@@ -20,6 +24,11 @@ set -euo pipefail
 
 REMOTE_BIN="/usr/local/bin/channel3"
 REMOTE_ROOT="/srv/channel3"
+
+# How long the warning sits on screen before the broadcast is stopped, so a
+# command typed while the kids are watching can still be interrupted. Set
+# CHANNEL3_YES=1 to skip the pause, which is what a script wants.
+STOP_WARNING_SECONDS=3
 
 if [ -z "${PI_HOST:-}" ]; then
 	cat >&2 <<'EOF'
@@ -50,7 +59,7 @@ start_service() {
 	if [ "$service_stopped" -eq 1 ]; then
 		service_stopped=0
 		printf '\n==> starting channel3 again\n'
-		if ! ssh "$PI_HOST" sudo systemctl start channel3; then
+		if ! ssh -t "$PI_HOST" sudo systemctl start channel3; then
 			printf 'ingest: could not start channel3 again. Start it by hand with:\n' >&2
 			printf '  ssh %s sudo systemctl start channel3\n' "$PI_HOST" >&2
 		fi
@@ -77,7 +86,12 @@ if [ "$active_status" -eq 0 ]; then
     finishes, which for a large channel is minutes, not seconds.
 
 EOF
-	ssh "$PI_HOST" sudo systemctl stop channel3
+	if [ "${CHANNEL3_YES:-}" != "1" ]; then
+		printf '    Stopping in %ds. Press Ctrl-C now to leave the broadcast alone.\n\n' \
+			"$STOP_WARNING_SECONDS"
+		sleep "$STOP_WARNING_SECONDS"
+	fi
+	ssh -t "$PI_HOST" sudo systemctl stop channel3
 	service_stopped=1
 else
 	printf '==> channel3 is not running on %s, ingesting directly\n\n' "$PI_HOST"

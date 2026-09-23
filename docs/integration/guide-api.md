@@ -134,11 +134,11 @@ The API reads the station through a mutex guarded accessor, so a request arrivin
 
 ## Known divergence between the guide and the screen
 
-The API does not see the broadcast loop's exclusions.
+The API applies the day's exclusions.
 
-When mpv cannot open a file, the station drops that item from the tuned channel for the rest of the broadcast day and the day's order is recomputed without it. The API computes the schedule from the channel list alone, so `/api/now` and `/api/guide` go on reporting the order that includes the excluded item, and the guide is then ahead of the screen until the 04:00 rollover clears the exclusions.
+When mpv cannot open a file, the station drops that item from the tuned channel for the rest of the broadcast day and the day's order is recomputed without it. `serve` hands the API the station's `PlayableChannels`, which is the channel list with those exclusions already removed, read under the same lock the broadcast loop writes them under. `/api/channels`, `/api/now` and `/api/guide` therefore report the order the television is really playing, and an exclusion is forgiven in both places at the 04:00 rollover.
 
-This only happens after a real load error, which on a working library is never. The fix is an exclusions accessor on `api.Deps`, guarded the same way `Channels` is, that the handlers apply before calling the schedule. That is future work and not Phase 7.
+One gap is left. The guide page holds whatever it last fetched and refreshes every 30 seconds, so an item excluded in between is still drawn on the page until that refresh. Reloading the page shows the corrected order at once.
 
 ## Deviations from the plan's sketch
 

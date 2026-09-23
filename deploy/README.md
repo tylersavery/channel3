@@ -84,7 +84,7 @@ make pi-ingest PI_HOST=channel3.local ARGS="--channel saturday-morning --dry-run
 
 Ingest refuses to run while the service is broadcasting on the same machine, which on the Pi is always. So `make pi-ingest` does the whole operation: it stops the service, runs the ingest, and starts it again afterwards, including when the ingest fails or you interrupt it.
 
-**The television is dark for the whole ingest.** A large channel takes minutes. Do not run this while the kids are watching.
+**The television is dark for the whole ingest.** A large channel takes minutes. Do not run this while the kids are watching. The script says so and waits three seconds before it stops the service, so a command typed in the middle of a programme can still be interrupted with Ctrl-C. Set `CHANNEL3_YES=1` to skip that pause, which is what a script wants.
 
 Starting the service again rescans the library, so the new items are on air immediately. Left alone, the library is rescanned at the 04:00 rollover and new items appear tomorrow.
 

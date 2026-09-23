@@ -157,7 +157,10 @@ func serve(ctx context.Context, root string, opts serveOptions) error {
 	stopHTTP, err := startHTTP(opts.Listen, api.Deps{
 		Channels: func() []schedule.Channel {
 			if s := current.Load(); s != nil {
-				return s.Channels()
+				// The exclusions go with it, so the guide shows the order the
+				// television is really playing rather than one that still
+				// includes a file mpv could not open.
+				return s.PlayableChannels()
 			}
 			return nil
 		},
