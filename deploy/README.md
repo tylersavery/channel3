@@ -97,6 +97,8 @@ rsync -av --rsync-path="sudo -u channel3 rsync" ~/srv/channel3/library/ channel3
 
 The `--rsync-path` is what makes the copied files land owned by `channel3` rather than by your ssh user. Without it the service can still read them, but ingest cannot later replace them.
 
+Video you put under `<root>/local/` yourself and reference by a relative path such as `local/steam-engines.mp4` travels the same way: rsync `~/srv/channel3/local/` alongside the library and the sidecars resolve against `/srv/channel3` on the Pi, so there is nothing to ingest again there.
+
 ## 8. Logs
 
 ```

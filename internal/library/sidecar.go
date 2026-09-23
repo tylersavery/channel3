@@ -30,7 +30,10 @@ const (
 // and nothing else: there is no file and no duration to record.
 //
 // File is relative to the sidecar's own directory for anything that was
-// downloaded, and absolute for a file:// source, which is never copied.
+// downloaded and for local video that lies under the root, which is what lets
+// the library be copied from the Mac to the Pi and still resolve. It is
+// absolute only for local video outside the root, which is never copied and only
+// plays on the machine it was ingested on.
 // Duration is seconds as a float, exact enough that cumulative schedule
 // boundaries do not drift. Size is the file's length in bytes at ingest, which
 // is how a replaced file is noticed: a sidecar whose size no longer matches the

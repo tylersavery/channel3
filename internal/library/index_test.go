@@ -265,10 +265,10 @@ func TestChannelDir(t *testing.T) {
 	}
 }
 
-// TestScanExcludesASidecarThatEscapesItsChannel covers a hand written or
-// damaged sidecar naming a file outside the library. The item is dropped with
-// that reason rather than silently resolved.
-func TestScanExcludesASidecarThatEscapesItsChannel(t *testing.T) {
+// TestScanExcludesASidecarThatEscapesTheRoot covers a hand written or damaged
+// sidecar naming a file outside the library root. The item is dropped with that
+// reason rather than silently resolved.
+func TestScanExcludesASidecarThatEscapesTheRoot(t *testing.T) {
 	logs := captureLogs(t)
 
 	index, err := Scan("testdata", fixtureChannels())
@@ -278,10 +278,10 @@ func TestScanExcludesASidecarThatEscapesItsChannel(t *testing.T) {
 
 	for _, item := range index.Items("trains") {
 		if item.ID == "escape005" {
-			t.Errorf("an item whose file escapes the channel directory was played: %+v", item)
+			t.Errorf("an item whose file escapes the library root was played: %+v", item)
 		}
 	}
-	if !strings.Contains(logs.String(), "escapes the channel directory") {
+	if !strings.Contains(logs.String(), "escapes the library root") {
 		t.Errorf("the escaping sidecar was not logged with that reason:\n%s", logs.String())
 	}
 }
@@ -292,12 +292,13 @@ func TestScanExcludesASidecarThatEscapesItsChannel(t *testing.T) {
 func TestScanExcludesAnEscapingFileThatExists(t *testing.T) {
 	logs := captureLogs(t)
 
-	root := t.TempDir()
+	sandbox := t.TempDir()
+	root := filepath.Join(sandbox, "root")
 	channelDir := ChannelDir(root, "trains")
 	if err := os.MkdirAll(channelDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	outside := filepath.Join(root, "outside.mp4")
+	outside := filepath.Join(sandbox, "outside.mp4")
 	if err := os.WriteFile(outside, []byte("not for the television"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -305,7 +306,7 @@ func TestScanExcludesAnEscapingFileThatExists(t *testing.T) {
 		ID:         "escaping",
 		Title:      "Outside The Library",
 		Source:     "https://example.com/outside",
-		File:       filepath.Join("..", "..", "outside.mp4"),
+		File:       filepath.Join("..", "..", "..", "outside.mp4"),
 		Duration:   90,
 		IngestedAt: mustTime(t, "2026-09-23T02:11:00Z"),
 		Status:     StatusOK,
@@ -321,8 +322,52 @@ func TestScanExcludesAnEscapingFileThatExists(t *testing.T) {
 	if got := len(index.Items("trains")); got != 0 {
 		t.Fatalf("got %d items, want the escaping one excluded: %+v", got, index.Items("trains"))
 	}
-	if !strings.Contains(logs.String(), "escapes the channel directory") {
+	if !strings.Contains(logs.String(), "escapes the library root") {
 		t.Errorf("the escaping sidecar was not logged with that reason:\n%s", logs.String())
+	}
+}
+
+// TestScanResolvesALocalFileUnderTheRoot is the path ingest writes for video in
+// <root>/local: relative to the sidecar's own directory, climbing out of the
+// channel but not out of the root, so the library plays wherever it is copied.
+func TestScanResolvesALocalFileUnderTheRoot(t *testing.T) {
+	captureLogs(t)
+
+	root := t.TempDir()
+	video := filepath.Join(root, "local", "steam-engines.mp4")
+	if err := os.MkdirAll(filepath.Dir(video), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(video, []byte("placeholder"), 0o644); err != nil {
+		t.Fatalf("write video: %v", err)
+	}
+	channelDir := ChannelDir(root, "trains")
+	if err := os.MkdirAll(channelDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	err := WriteSidecar(filepath.Join(channelDir, "steam-engines.json"), Sidecar{
+		ID:         "steam-engines",
+		Title:      "steam engines",
+		Source:     "local/steam-engines.mp4",
+		File:       filepath.Join("..", "..", "local", "steam-engines.mp4"),
+		Duration:   90.25,
+		IngestedAt: mustTime(t, "2026-09-23T02:11:00Z"),
+		Status:     StatusOK,
+	})
+	if err != nil {
+		t.Fatalf("WriteSidecar: %v", err)
+	}
+
+	index, err := Scan(root, []Channel{{ID: "trains", Number: 3, Name: "Train TV"}})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	items := index.Items("trains")
+	if len(items) != 1 {
+		t.Fatalf("got %d items, want the local file kept: %+v", len(items), items)
+	}
+	if items[0].Path != video {
+		t.Errorf("path = %q, want %q", items[0].Path, video)
 	}
 }
 

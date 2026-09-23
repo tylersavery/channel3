@@ -1,6 +1,7 @@
 package library
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -113,7 +114,7 @@ func newIngestRun(opts IngestOptions) (*ingestRun, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := checkLocalSlugs(channels); err != nil {
+	if err := checkLocalSlugs(root, channels); err != nil {
 		return nil, err
 	}
 	if err := checkNotBroadcasting(root); err != nil {
@@ -187,19 +188,19 @@ func processAlive(pid int) bool {
 	return err == nil || errors.Is(err, os.ErrPermission)
 }
 
-// checkLocalSlugs reports every pair of file:// sources in one channel that
-// would claim the same item id, before anything is downloaded. Two files named
+// checkLocalSlugs reports every pair of local sources in one channel that would
+// claim the same item id, before anything is downloaded. Two files named
 // "Steam Engines.mp4" and "steam-engines.mp4" would otherwise overwrite each
 // other's sidecar.
-func checkLocalSlugs(channels []Channel) error {
+func checkLocalSlugs(root string, channels []Channel) error {
 	var problems []error
 	for _, ch := range channels {
 		claimedBy := make(map[string]string)
 		for _, source := range ch.Sources {
-			if !isLocalSource(source) {
+			if !isLocalSource(source.URL) {
 				continue
 			}
-			path, err := localPath(source)
+			path, err := localPath(root, source.URL)
 			if err != nil {
 				continue // Reported per item, with a failed sidecar.
 			}
@@ -210,10 +211,10 @@ func checkLocalSlugs(channels []Channel) error {
 			if prior, taken := claimedBy[id]; taken {
 				problems = append(problems, fmt.Errorf(
 					"channel %s: local sources %q and %q both become item id %q; rename one file",
-					ch.ID, prior, source, id))
+					ch.ID, prior, source.URL, id))
 				continue
 			}
-			claimedBy[id] = source
+			claimedBy[id] = source.URL
 		}
 	}
 	return errors.Join(problems...)
@@ -224,7 +225,7 @@ func (r *ingestRun) ingestChannel(ch Channel) error {
 	dir := ChannelDir(r.root, ch.ID)
 	for _, source := range ch.Sources {
 		var err error
-		if isLocalSource(source) {
+		if isLocalSource(source.URL) {
 			err = r.ingestLocal(ch, dir, source)
 		} else {
 			err = r.ingestRemote(ch, dir, source)
@@ -241,12 +242,12 @@ func (r *ingestRun) ingestChannel(ch Channel) error {
 // Expansion always runs, even when every video behind the source is already in
 // the library, because that is the only way a video added to a playlist since
 // the last run is noticed.
-func (r *ingestRun) ingestRemote(ch Channel, dir, source string) error {
-	entries, err := r.runner.Expand(source)
+func (r *ingestRun) ingestRemote(ch Channel, dir string, source Source) error {
+	entries, err := r.runner.Expand(source.URL)
 	if err != nil {
-		return r.fail(ch, dir, sourceID(source), source, err)
+		return r.fail(ch, dir, sourceID(source.URL), source.URL, err)
 	}
-	if err := r.clearSourceFailure(dir, source); err != nil {
+	if err := r.clearSourceFailure(dir, source.URL); err != nil {
 		return err
 	}
 	for _, entry := range entries {
@@ -289,18 +290,19 @@ func (r *ingestRun) clearSourceFailure(dir, source string) error {
 // The id decides the name of both the video file and its sidecar, and it comes
 // from whatever the runner reported, so it is checked here before any path is
 // built from it.
-func (r *ingestRun) ingestEntry(ch Channel, dir, source string, entry Entry) error {
+func (r *ingestRun) ingestEntry(ch Channel, dir string, source Source, entry Entry) error {
 	if !ValidItemID(entry.ID) {
-		return r.fail(ch, dir, sourceID(source), source,
+		return r.fail(ch, dir, sourceID(source.URL), source.URL,
 			fmt.Errorf("the source offered the item id %q, which %s", entry.ID, itemIDRule))
 	}
-	if r.alreadyIngested(dir, entry.ID) {
-		r.line("skip", ch, entry.ID, "")
-		r.report.Skipped++
-		return nil
+	// Only a configured title can retitle a remote item without downloading it.
+	// The title yt-dlp reports is not known until the download runs, and the one
+	// the playlist listing carries is often a different, shorter string.
+	if existing, done := r.alreadyIngested(dir, entry.ID); done {
+		return r.keepOrRetitle(ch, dir, existing, source.Title)
 	}
 	if r.dryRun {
-		r.line("plan", ch, entry.ID, entry.Title)
+		r.line("plan", ch, entry.ID, cmp.Or(source.Title, entry.Title))
 		r.report.Planned++
 		return nil
 	}
@@ -322,10 +324,7 @@ func (r *ingestRun) ingestEntry(ch Channel, dir, source string, entry Entry) err
 		return r.fail(ch, dir, entry.ID, entry.URL, err)
 	}
 
-	title := result.Title
-	if title == "" {
-		title = entry.Title
-	}
+	title := cmp.Or(source.Title, result.Title, entry.Title)
 	file, err := filepath.Rel(dir, result.Path)
 	if err != nil || strings.HasPrefix(file, "..") {
 		// A download outside its own channel directory should not happen, but
@@ -342,31 +341,30 @@ func (r *ingestRun) ingestEntry(ch Channel, dir, source string, entry Entry) err
 	})
 }
 
-// ingestLocal records a file:// source where it already lies. Local video is
+// ingestLocal records a local source where it already lies. Local video is
 // never copied into the library: only its sidecar goes there.
-func (r *ingestRun) ingestLocal(ch Channel, dir, source string) error {
-	path, err := localPath(source)
+func (r *ingestRun) ingestLocal(ch Channel, dir string, source Source) error {
+	path, err := localPath(r.root, source.URL)
 	if err != nil {
-		return r.fail(ch, dir, sourceID(source), source, err)
+		return r.fail(ch, dir, sourceID(source.URL), source.URL, err)
 	}
 	id := slugify(stem(path))
 	if id == "" {
-		return r.fail(ch, dir, sourceID(source), source,
+		return r.fail(ch, dir, sourceID(source.URL), source.URL,
 			fmt.Errorf("file name %q has no letters or digits to make an item id from", filepath.Base(path)))
 	}
+	title := cmp.Or(source.Title, defaultLocalTitle(path))
 
-	if r.alreadyIngested(dir, id) {
-		r.line("skip", ch, id, "")
-		r.report.Skipped++
-		return nil
+	if existing, done := r.alreadyIngested(dir, id); done {
+		return r.keepOrRetitle(ch, dir, existing, title)
 	}
 	if r.dryRun {
-		r.line("plan", ch, id, stem(path))
+		r.line("plan", ch, id, title)
 		r.report.Planned++
 		return nil
 	}
 	if !isRegularFile(path) {
-		return r.fail(ch, dir, id, source, fmt.Errorf("%s is not a readable file", path))
+		return r.fail(ch, dir, id, source.URL, fmt.Errorf("%s is not a readable file", path))
 	}
 	if err := r.ensureDir(dir); err != nil {
 		return err
@@ -374,20 +372,44 @@ func (r *ingestRun) ingestLocal(ch Channel, dir, source string) error {
 
 	duration, err := r.duration(path, 0)
 	if err != nil {
-		return r.fail(ch, dir, id, source, err)
+		return r.fail(ch, dir, id, source.URL, err)
 	}
 	size, err := fileSize(path)
 	if err != nil {
-		return r.fail(ch, dir, id, source, err)
+		return r.fail(ch, dir, id, source.URL, err)
 	}
 	return r.writeOK(ch, dir, Sidecar{
 		ID:       id,
-		Title:    stem(path),
-		Source:   source,
-		File:     path,
+		Title:    title,
+		Source:   source.URL,
+		File:     r.sidecarFile(dir, path),
 		Duration: duration,
 		Size:     size,
 	})
+}
+
+// sidecarFile is the path a local item's sidecar records for its video.
+//
+// A file under the root is written relative to the sidecar's own directory, for
+// example ../../local/steam-engines.mp4, so that copying <root>/library and
+// <root>/local to another machine is enough: the sidecars resolve against
+// whichever root they are read from. A file outside the root has no such path
+// and keeps its absolute one, which only plays on the machine it was ingested on.
+func (r *ingestRun) sidecarFile(dir, path string) string {
+	rel, err := filepath.Rel(dir, path)
+	if err != nil || !underRoot(r.root, path) {
+		return path
+	}
+	return rel
+}
+
+// underRoot reports whether path lies inside root.
+func underRoot(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // duration probes path, falling back to yt-dlp's whole-second figure when
@@ -455,26 +477,27 @@ func (r *ingestRun) fail(ch Channel, dir, id, source string, cause error) error 
 	})
 }
 
-// alreadyIngested reports whether this item can be left alone: an ok sidecar
-// whose file is still on disk, at the size it was ingested at. A failed sidecar
-// is retried, and so is an ok one whose file has gone or has changed.
+// alreadyIngested reports whether this item's video can be left alone, and
+// returns the sidecar that says so: an ok sidecar whose file is still on disk,
+// at the size it was ingested at. A failed sidecar is retried, and so is an ok
+// one whose file has gone or has changed.
 //
 // The size check is what notices a replaced clip. Somebody who drops a longer
 // cut of a local video in under the same name would otherwise keep the old
 // duration in the sidecar, and every schedule boundary after that item on that
 // channel would be wrong for the rest of the day. A sidecar written before size
 // was recorded has none, and is skipped as it always was.
-func (r *ingestRun) alreadyIngested(dir, id string) bool {
+func (r *ingestRun) alreadyIngested(dir, id string) (Sidecar, bool) {
 	path, err := r.sidecarPath(dir, id)
 	if err != nil {
-		return false
+		return Sidecar{}, false
 	}
 	sidecar, err := ReadSidecar(path)
 	if err != nil {
-		return false
+		return Sidecar{}, false
 	}
 	if sidecar.Status != StatusOK || sidecar.File == "" {
-		return false
+		return Sidecar{}, false
 	}
 	media := sidecar.File
 	if !filepath.IsAbs(media) {
@@ -482,14 +505,47 @@ func (r *ingestRun) alreadyIngested(dir, id string) bool {
 	}
 	info, err := os.Stat(media)
 	if err != nil || !info.Mode().IsRegular() {
-		return false
+		return Sidecar{}, false
 	}
 	if sidecar.Size > 0 && sidecar.Size != info.Size() {
 		slog.Info("the file has changed since it was ingested, ingesting it again",
 			"id", id, "path", media, "ingested size", sidecar.Size, "size now", info.Size())
-		return false
+		return Sidecar{}, false
 	}
-	return true
+	return sidecar, true
+}
+
+// keepOrRetitle finishes an item whose video is already in the library.
+//
+// A configured title that no longer matches the sidecar is written straight in.
+// The video itself has not changed, so nothing is downloaded or probed again,
+// and the item is reported as ok with the title as its reason rather than as a
+// skip, because the run did change something. An empty title means the caller
+// has nothing to compare, which happens for a remote source with no configured
+// title: only yt-dlp knows what that item is called, and asking it would mean a
+// download.
+//
+// A dry run writes nothing, so it reports the skip it would otherwise report.
+func (r *ingestRun) keepOrRetitle(ch Channel, dir string, s Sidecar, title string) error {
+	if title == "" || title == s.Title || r.dryRun {
+		r.line("skip", ch, s.ID, "")
+		r.report.Skipped++
+		return nil
+	}
+
+	path, err := r.sidecarPath(dir, s.ID)
+	if err != nil {
+		return err
+	}
+	slog.Info("the configured title has changed, rewriting the sidecar",
+		"channel", ch.ID, "id", s.ID, "title was", s.Title, "title now", title)
+	s.Title = title
+	if err := WriteSidecar(path, s); err != nil {
+		return err
+	}
+	r.line("ok", ch, s.ID, "title: "+title)
+	r.report.OK++
+	return nil
 }
 
 // fileSize is the length of a file that has just been probed. A stat that fails
@@ -543,19 +599,43 @@ func (r *ingestRun) printSummary() {
 	fmt.Fprintf(r.out, "ingest: %d ok, %d skipped, %d failed\n", r.report.OK, r.report.Skipped, r.report.Failed)
 }
 
-// localScheme is the prefix of a source that names video already on disk.
+// localScheme is the prefix of a source that names video already on disk by its
+// absolute path.
 const localScheme = "file://"
 
+// remoteSchemes are the prefixes of a source ingest downloads. Everything else
+// names video that is already on this machine.
+var remoteSchemes = []string{"http://", "https://"}
+
 // isLocalSource reports whether source names a local file rather than something
-// to download.
+// to download: a file:// URL, or a path relative to the root.
 func isLocalSource(source string) bool {
-	return strings.HasPrefix(source, localScheme)
+	for _, scheme := range remoteSchemes {
+		if strings.HasPrefix(source, scheme) {
+			return false
+		}
+	}
+	return true
 }
 
-// localPath turns a file:// source into an absolute path. Only this machine's
-// own files are accepted: a host in the URL would name another machine, which
-// playback cannot read.
-func localPath(source string) (string, error) {
+// localPath turns a local source into an absolute path.
+//
+// A source with no scheme is a path relative to root, which is how video that
+// travels with the library is written: the same config resolves against
+// ~/srv/channel3 on the Mac and /srv/channel3 on the Pi. A file:// source is
+// absolute and names video outside the root. Only this machine's own files are
+// accepted: a host in the URL would name another machine, which playback cannot
+// read.
+func localPath(root, source string) (string, error) {
+	if !strings.HasPrefix(source, localScheme) {
+		cleaned := filepath.Clean(source)
+		if filepath.IsAbs(cleaned) || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+			return "", fmt.Errorf("%q is not a path inside the root; write it as local/video.mp4 "+
+				"or as file:///path/to/video.mp4", source)
+		}
+		return filepath.Join(root, cleaned), nil
+	}
+
 	parsed, err := url.Parse(source)
 	if err != nil {
 		return "", fmt.Errorf("parse %q: %w", source, err)
@@ -573,6 +653,18 @@ func localPath(source string) (string, error) {
 func stem(path string) string {
 	base := filepath.Base(path)
 	return strings.TrimSuffix(base, filepath.Ext(base))
+}
+
+// titleSeparators matches every run of characters that becomes one space in a
+// local file's default title: the hyphens and underscores that stand in for
+// spaces in a file name, and any whitespace already there.
+var titleSeparators = regexp.MustCompile(`[-_\s]+`)
+
+// defaultLocalTitle is the guide title of a local file with none configured: its
+// name without the extension, read as words. steam-engines_v2.mp4 becomes
+// "steam engines v2".
+func defaultLocalTitle(path string) string {
+	return strings.TrimSpace(titleSeparators.ReplaceAllString(stem(path), " "))
 }
 
 // itemIDPattern is every id that may be turned into a path in the library.

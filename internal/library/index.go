@@ -98,7 +98,7 @@ func scanChannel(absRoot string, ch Channel) ([]Item, error) {
 			slog.Warn("excluding item: sidecar is unreadable", "channel", ch.ID, "sidecar", path, "err", err)
 			continue
 		}
-		item, ok := itemFromSidecar(ch.ID, dir, sidecar)
+		item, ok := itemFromSidecar(absRoot, ch.ID, dir, sidecar)
 		if !ok {
 			continue
 		}
@@ -110,7 +110,7 @@ func scanChannel(absRoot string, ch Channel) ([]Item, error) {
 }
 
 // itemFromSidecar turns one sidecar into a playable item, or logs why it cannot.
-func itemFromSidecar(channelID, dir string, s Sidecar) (Item, bool) {
+func itemFromSidecar(absRoot, channelID, dir string, s Sidecar) (Item, bool) {
 	if s.Status != StatusOK {
 		slog.Warn("excluding item: status is not ok",
 			"channel", channelID, "id", s.ID, "status", string(s.Status), "reason", s.Error)
@@ -123,10 +123,10 @@ func itemFromSidecar(channelID, dir string, s Sidecar) (Item, bool) {
 
 	path := s.File
 	if !filepath.IsAbs(path) {
-		resolved, ok := insideChannelDir(dir, path)
+		resolved, ok := insideRoot(absRoot, dir, path)
 		if !ok {
-			slog.Warn("excluding item: sidecar file escapes the channel directory",
-				"channel", channelID, "id", s.ID, "file", s.File, "dir", dir)
+			slog.Warn("excluding item: sidecar file escapes the library root",
+				"channel", channelID, "id", s.ID, "file", s.File, "root", absRoot)
 			return Item{}, false
 		}
 		path = resolved
@@ -160,18 +160,20 @@ func itemFromSidecar(channelID, dir string, s Sidecar) (Item, bool) {
 	}, true
 }
 
-// insideChannelDir resolves a relative sidecar file against its channel
-// directory and reports whether it stayed there.
+// insideRoot resolves a relative sidecar file against the sidecar's own
+// directory and reports whether it stayed inside the library root.
 //
-// A sidecar is a file on disk and its "file" field is not validated by anything
-// upstream, so a hand written or damaged one naming ../../something would
-// otherwise put an arbitrary file on a children's television. Only a path that
-// is still under the channel directory is played. An absolute path, which is
-// what a file:// source records, never reaches here: those are deliberate and
-// point at media that was never copied into the library.
-func insideChannelDir(dir, file string) (string, bool) {
+// The root rather than the channel directory is the boundary, because a local
+// file under <root>/local is recorded as ../../local/steam-engines.mp4 so that
+// the library can be copied between machines. A sidecar is a file on disk and
+// its "file" field is not validated by anything upstream, so a hand written or
+// damaged one climbing past the root would otherwise put an arbitrary file on a
+// children's television. An absolute path, which is what a file:// source
+// outside the root records, never reaches here: those are deliberate and point
+// at media that was never copied into the library.
+func insideRoot(absRoot, dir, file string) (string, bool) {
 	resolved := filepath.Join(dir, file)
-	rel, err := filepath.Rel(dir, resolved)
+	rel, err := filepath.Rel(absRoot, resolved)
 	if err != nil {
 		return "", false
 	}

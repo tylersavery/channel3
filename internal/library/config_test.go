@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -52,11 +53,152 @@ func TestLoadChannelsValid(t *testing.T) {
 	if trains.Name != "Train TV" {
 		t.Errorf("trains name = %q, want %q", trains.Name, "Train TV")
 	}
-	if len(trains.Sources) != 2 {
-		t.Fatalf("trains has %d sources, want 2", len(trains.Sources))
+	want := []Source{
+		{URL: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"},
+		{URL: "file:///srv/channel3/local/steam-engines.mp4"},
+		{URL: "local/branch-line.mp4"},
+		{URL: "local/shunting_yard.mp4", Title: "Shunting Yard"},
 	}
-	if trains.Sources[1] != "file:///srv/channel3/local/steam-engines.mp4" {
-		t.Errorf("trains second source = %q", trains.Sources[1])
+	if !reflect.DeepEqual(trains.Sources, want) {
+		t.Errorf("trains sources = %+v\nwant %+v", trains.Sources, want)
+	}
+}
+
+// TestLoadChannelsSourceForms is the whole grammar of one sources entry: a URL,
+// a root-relative path, and the mapping that gives an item its guide title.
+func TestLoadChannelsSourceForms(t *testing.T) {
+	cases := []struct {
+		name    string
+		entry   string
+		want    Source
+		wantErr string
+	}{
+		{
+			name:  "https url",
+			entry: "  - https://www.youtube.com/watch?v=dQw4w9WgXcQ\n",
+			want:  Source{URL: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"},
+		},
+		{
+			name:  "http url",
+			entry: "  - http://example.com/a.mp4\n",
+			want:  Source{URL: "http://example.com/a.mp4"},
+		},
+		{
+			name:  "file url",
+			entry: "  - file:///srv/channel3/local/a.mp4\n",
+			want:  Source{URL: "file:///srv/channel3/local/a.mp4"},
+		},
+		{
+			name:  "root-relative path",
+			entry: "  - local/x.mp4\n",
+			want:  Source{URL: "local/x.mp4"},
+		},
+		{
+			name:  "root-relative path in a subdirectory",
+			entry: "  - local/kids/x.mp4\n",
+			want:  Source{URL: "local/kids/x.mp4"},
+		},
+		{
+			name:  "mapping with a title",
+			entry: "  - source: local/x.mp4\n    title: Colour Bars\n",
+			want:  Source{URL: "local/x.mp4", Title: "Colour Bars"},
+		},
+		{
+			name:  "mapping with a title for a url",
+			entry: "  - source: https://example.com/a\n    title: Colour Bars\n",
+			want:  Source{URL: "https://example.com/a", Title: "Colour Bars"},
+		},
+		{
+			name:  "mapping with no title",
+			entry: "  - source: local/x.mp4\n",
+			want:  Source{URL: "local/x.mp4"},
+		},
+		{
+			name:    "path climbing out of the root",
+			entry:   "  - ../x.mp4\n",
+			wantErr: "sources[0]",
+		},
+		{
+			name:    "path climbing out through a subdirectory",
+			entry:   "  - local/../../x.mp4\n",
+			wantErr: "sources[0]",
+		},
+		{
+			name:    "unclean path",
+			entry:   "  - local/../x.mp4\n",
+			wantErr: "sources[0]",
+		},
+		{
+			name:    "absolute path with no scheme",
+			entry:   "  - /abs/x.mp4\n",
+			wantErr: "sources[0]",
+		},
+		{
+			name:    "unknown scheme",
+			entry:   "  - ftp://example.com/a.mp4\n",
+			wantErr: "sources[0]",
+		},
+		{
+			name:    "mapping with no source",
+			entry:   "  - title: Colour Bars\n",
+			wantErr: "must have a source",
+		},
+		{
+			name:    "mapping with an unknown field",
+			entry:   "  - source: local/x.mp4\n    name: Colour Bars\n",
+			wantErr: "unknown field",
+		},
+		{
+			name:    "entry that is neither a string nor a mapping",
+			entry:   "  - - local/x.mp4\n",
+			wantErr: "a mapping",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			captureLogs(t)
+			dir := t.TempDir()
+			writeConfig(t, dir, "one.yaml", "id: trains\nnumber: 3\nname: Train TV\nsources:\n"+tc.entry)
+
+			channels, err := LoadChannels(dir)
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("LoadChannels accepted %q", tc.entry)
+				}
+				if !strings.Contains(err.Error(), "one.yaml") {
+					t.Errorf("error %q does not name the file", err)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Errorf("error %q does not mention %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LoadChannels rejected %q: %v", tc.entry, err)
+			}
+			if len(channels) != 1 || len(channels[0].Sources) != 1 {
+				t.Fatalf("got %+v, want one channel with one source", channels)
+			}
+			if got := channels[0].Sources[0]; got != tc.want {
+				t.Errorf("source = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSourceProblemNamesTheRootRelativeForm keeps the config error readable: a
+// bare path that is rejected has to say what a good one looks like.
+func TestSourceProblemNamesTheRootRelativeForm(t *testing.T) {
+	problem := sourceProblem("/srv/channel3/local/a.mp4")
+	if problem == "" {
+		t.Fatal("an absolute path with no scheme was accepted")
+	}
+	if !strings.Contains(problem, "root-relative") {
+		t.Errorf("problem %q does not describe the root-relative form", problem)
+	}
+	if problem := sourceProblem("ftp://example.com/a.mp4"); !strings.Contains(problem, "root-relative") {
+		t.Errorf("problem %q does not offer the root-relative form", problem)
 	}
 }
 
@@ -157,7 +299,7 @@ func TestLoadChannelsInvalid(t *testing.T) {
 			field: "sources[0]",
 		},
 		{
-			name:  "bare path source",
+			name:  "absolute path source",
 			body:  "id: trains\nnumber: 3\nname: Train TV\nsources:\n  - /srv/channel3/local/a.mp4\n",
 			field: "sources[0]",
 		},

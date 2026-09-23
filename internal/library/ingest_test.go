@@ -192,8 +192,19 @@ func (f *ingestFixture) sidecar(t *testing.T, channelID, id string) Sidecar {
 	return s
 }
 
-// trainsChannel is the channel most of these tests ingest into.
-func trainsChannel(sources ...string) []Channel {
+// trainsChannel is the channel most of these tests ingest into, with one
+// untitled source per url.
+func trainsChannel(urls ...string) []Channel {
+	sources := make([]Source, 0, len(urls))
+	for _, url := range urls {
+		sources = append(sources, Source{URL: url})
+	}
+	return trainsChannelWith(sources...)
+}
+
+// trainsChannelWith is the same channel built from sources that may carry a
+// configured title.
+func trainsChannelWith(sources ...Source) []Channel {
 	return []Channel{{ID: "trains", Number: 3, Name: "Train TV", Sources: sources}}
 }
 
@@ -680,8 +691,8 @@ func TestIngestChannelFilter(t *testing.T) {
 	f.runner.entries[spaceSource] = []Entry{{ID: "space001", URL: spaceSource, Title: "Orbits"}}
 
 	channels := []Channel{
-		{ID: "trains", Number: 3, Name: "Train TV", Sources: []string{trainsSource}},
-		{ID: "space", Number: 12, Name: "Space Channel", Sources: []string{spaceSource}},
+		{ID: "trains", Number: 3, Name: "Train TV", Sources: []Source{{URL: trainsSource}}},
+		{ID: "space", Number: 12, Name: "Space Channel", Sources: []Source{{URL: spaceSource}}},
 	}
 
 	report, err := f.run(channels, func(o *IngestOptions) { o.ChannelID = "space" })
@@ -977,6 +988,7 @@ func TestSlugify(t *testing.T) {
 }
 
 func TestLocalPath(t *testing.T) {
+	const root = "/srv/channel3"
 	cases := []struct {
 		name    string
 		source  string
@@ -989,10 +1001,15 @@ func TestLocalPath(t *testing.T) {
 		{name: "other host", source: "file://nas/srv/a.mp4", wantErr: "names the host"},
 		{name: "bare name reads as a host", source: "file://a.mp4", wantErr: "names the host"},
 		{name: "no path at all", source: "file://localhost", wantErr: "absolute path"},
+		{name: "root-relative", source: "local/a.mp4", want: "/srv/channel3/local/a.mp4"},
+		{name: "root-relative subdirectory", source: "local/kids/a.mp4", want: "/srv/channel3/local/kids/a.mp4"},
+		{name: "climbs out of the root", source: "../a.mp4", wantErr: "inside the root"},
+		{name: "cleans its way out of the root", source: "local/../../a.mp4", wantErr: "inside the root"},
+		{name: "absolute with no scheme", source: "/etc/passwd", wantErr: "inside the root"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := localPath(tc.source)
+			got, err := localPath(root, tc.source)
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("error = %v, want one mentioning %q", err, tc.wantErr)
@@ -1006,6 +1023,37 @@ func TestLocalPath(t *testing.T) {
 				t.Errorf("localPath(%q) = %q, want %q", tc.source, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestIsLocalSource pins which sources ingest downloads and which it records
+// where they already lie.
+func TestIsLocalSource(t *testing.T) {
+	for _, source := range []string{"local/a.mp4", "file:///srv/a.mp4", "a.mp4"} {
+		if !isLocalSource(source) {
+			t.Errorf("isLocalSource(%q) = false, want true", source)
+		}
+	}
+	for _, source := range []string{"https://example.com/a", "http://example.com/a"} {
+		if isLocalSource(source) {
+			t.Errorf("isLocalSource(%q) = true, want false", source)
+		}
+	}
+}
+
+func TestDefaultLocalTitle(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"steam-engines_v2.mp4", "steam engines v2"},
+		{"Steam Engines.mp4", "Steam Engines"},
+		{"/srv/channel3/local/steam-engines.mp4", "steam engines"},
+		{"a__b--c.mp4", "a b c"},
+		{"  spaced  out  .mp4", "spaced out"},
+		{"Colour_Bars.mkv", "Colour Bars"},
+	}
+	for _, tc := range cases {
+		if got := defaultLocalTitle(tc.in); got != tc.want {
+			t.Errorf("defaultLocalTitle(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }
 
@@ -1174,5 +1222,397 @@ func TestIngestSkipsASidecarWithNoSize(t *testing.T) {
 	}
 	if got := f.sidecar(t, "trains", "zulu001"); got.Size != 0 {
 		t.Errorf("the skipped sidecar was rewritten with size %d", got.Size)
+	}
+}
+
+// TestIngestLocalFileUnderTheRootIsRecordedRelatively is the whole point of a
+// root-relative source: the sidecar names the video by a path that resolves
+// from the sidecar's own directory, so the library plays on the machine it is
+// copied to as well as the one it was ingested on.
+func TestIngestLocalFileUnderTheRootIsRecordedRelatively(t *testing.T) {
+	captureLogs(t)
+	f := newIngestFixture(t)
+	video := filepath.Join(f.root, "local", "steam-engines.mp4")
+	copyTinyMP4(t, video)
+	f.prober.seconds[video] = 90.25
+
+	report, err := f.run(trainsChannel("local/steam-engines.mp4"))
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if report != (Report{OK: 1}) {
+		t.Errorf("report = %+v, want one ok", report)
+	}
+	if len(f.runner.calls) != 0 {
+		t.Errorf("a local source reached the runner: %v", f.runner.calls)
+	}
+
+	got := f.sidecar(t, "trains", "steam-engines")
+	want := filepath.Join("..", "..", "local", "steam-engines.mp4")
+	if got.File != want {
+		t.Errorf("file = %q, want %q", got.File, want)
+	}
+	if got.Source != "local/steam-engines.mp4" {
+		t.Errorf("source = %q, want the configured path", got.Source)
+	}
+	if got.Title != "steam engines" {
+		t.Errorf("title = %q, want the file name read as words", got.Title)
+	}
+	if got.Duration != 90.25 {
+		t.Errorf("duration = %v, want 90.25", got.Duration)
+	}
+}
+
+// TestIngestFileURLUnderTheRootIsRecordedRelatively covers a file:// source
+// that happens to point inside the root. It is the same video as a relative
+// source names, so it is recorded the same way.
+func TestIngestFileURLUnderTheRootIsRecordedRelatively(t *testing.T) {
+	captureLogs(t)
+	f := newIngestFixture(t)
+	video := filepath.Join(f.root, "local", "steam-engines.mp4")
+	copyTinyMP4(t, video)
+
+	if _, err := f.run(trainsChannel("file://" + video)); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	got := f.sidecar(t, "trains", "steam-engines")
+	want := filepath.Join("..", "..", "local", "steam-engines.mp4")
+	if got.File != want {
+		t.Errorf("file = %q, want %q", got.File, want)
+	}
+}
+
+// TestIngestLocalFileOutsideTheRootStaysAbsolute covers video that was never
+// put under the root. There is no relative path that survives a copy, so the
+// absolute one is kept and the item plays only on this machine.
+func TestIngestLocalFileOutsideTheRootStaysAbsolute(t *testing.T) {
+	captureLogs(t)
+	f := newIngestFixture(t)
+	outside := filepath.Join(t.TempDir(), "steam-engines.mp4")
+	copyTinyMP4(t, outside)
+
+	if _, err := f.run(trainsChannel("file://" + outside)); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	got := f.sidecar(t, "trains", "steam-engines")
+	if got.File != outside {
+		t.Errorf("file = %q, want the absolute path %q", got.File, outside)
+	}
+	if !filepath.IsAbs(got.File) {
+		t.Errorf("file %q is not absolute", got.File)
+	}
+}
+
+// TestIngestSkipsBothKindsOfLocalFile checks that the skip logic follows a
+// relative sidecar path as well as an absolute one, so a second run of an
+// unchanged library probes nothing.
+func TestIngestSkipsBothKindsOfLocalFile(t *testing.T) {
+	captureLogs(t)
+	f := newIngestFixture(t)
+	inside := filepath.Join(f.root, "local", "inside.mp4")
+	outside := filepath.Join(t.TempDir(), "outside.mp4")
+	copyTinyMP4(t, inside)
+	copyTinyMP4(t, outside)
+
+	channels := trainsChannel("local/inside.mp4", "file://"+outside)
+	if _, err := f.run(channels); err != nil {
+		t.Fatalf("first Ingest: %v", err)
+	}
+
+	second := newIngestFixture(t)
+	second.root = f.root
+	report, err := second.run(channels)
+	if err != nil {
+		t.Fatalf("second Ingest: %v", err)
+	}
+	if report != (Report{Skipped: 2}) {
+		t.Errorf("report = %+v, want both files skipped", report)
+	}
+	if len(second.prober.calls) != 0 {
+		t.Errorf("an unchanged file was probed again: %v", second.prober.calls)
+	}
+}
+
+// TestIngestReprobesARelativeLocalFileThatChanged is the size check reaching
+// through a relative sidecar path. A longer cut dropped in under the same name
+// has to be probed again or every schedule boundary after it is wrong.
+func TestIngestReprobesARelativeLocalFileThatChanged(t *testing.T) {
+	captureLogs(t)
+	f := newIngestFixture(t)
+	video := filepath.Join(f.root, "local", "steam-engines.mp4")
+	copyTinyMP4(t, video)
+	f.prober.seconds[video] = 90.25
+
+	channels := trainsChannel("local/steam-engines.mp4")
+	if _, err := f.run(channels); err != nil {
+		t.Fatalf("first Ingest: %v", err)
+	}
+
+	data, err := os.ReadFile(video)
+	if err != nil {
+		t.Fatalf("read the local file: %v", err)
+	}
+	if err := os.WriteFile(video, append(data, data...), 0o644); err != nil {
+		t.Fatalf("grow the local file: %v", err)
+	}
+
+	second := newIngestFixture(t)
+	second.root = f.root
+	second.prober.seconds[video] = 181.5
+
+	report, err := second.run(channels)
+	if err != nil {
+		t.Fatalf("second Ingest: %v", err)
+	}
+	if report != (Report{OK: 1}) {
+		t.Errorf("report = %+v, want the changed file ingested again", report)
+	}
+	got := second.sidecar(t, "trains", "steam-engines")
+	if got.Duration != 181.5 {
+		t.Errorf("duration = %v, want the new length 181.5", got.Duration)
+	}
+	if want := int64(len(data) * 2); got.Size != want {
+		t.Errorf("size = %d, want the new size %d", got.Size, want)
+	}
+}
+
+// TestIngestConfiguredTitleWins covers the mapping form of a source for both a
+// local file, where it replaces the file name, and a remote one, where it
+// replaces what yt-dlp reports.
+func TestIngestConfiguredTitleWins(t *testing.T) {
+	captureLogs(t)
+	f := newIngestFixture(t)
+	video := filepath.Join(f.root, "local", "colour-bars.mp4")
+	copyTinyMP4(t, video)
+	const remote = "https://www.youtube.com/watch?v=zulu001"
+	f.runner.entries[remote] = []Entry{{ID: "zulu001", URL: remote, Title: "from the playlist"}}
+	f.runner.titles[remote] = "Steam Engines of the Rockies"
+
+	channels := trainsChannelWith(
+		Source{URL: "local/colour-bars.mp4", Title: "Colour Bars Two"},
+		Source{URL: remote, Title: "Trains, The Whole Hour"},
+	)
+	if _, err := f.run(channels); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if got := f.sidecar(t, "trains", "colour-bars").Title; got != "Colour Bars Two" {
+		t.Errorf("local title = %q, want the configured one", got)
+	}
+	if got := f.sidecar(t, "trains", "zulu001").Title; got != "Trains, The Whole Hour" {
+		t.Errorf("remote title = %q, want the configured one to beat yt-dlp", got)
+	}
+}
+
+// TestIngestRewritesAChangedTitleWithoutReprobing is editing a title in the
+// config: the video has not changed, so it is not downloaded or probed again,
+// but the guide has to show the new title on the next run.
+func TestIngestRewritesAChangedTitleWithoutReprobing(t *testing.T) {
+	logs := captureLogs(t)
+	f := newIngestFixture(t)
+	video := filepath.Join(f.root, "local", "colour-bars.mp4")
+	copyTinyMP4(t, video)
+
+	if _, err := f.run(trainsChannel("local/colour-bars.mp4")); err != nil {
+		t.Fatalf("first Ingest: %v", err)
+	}
+	first := f.sidecar(t, "trains", "colour-bars")
+	if first.Title != "colour bars" {
+		t.Fatalf("title = %q, want the default from the file name", first.Title)
+	}
+
+	second := newIngestFixture(t)
+	second.root = f.root
+	report, err := second.run(trainsChannelWith(Source{URL: "local/colour-bars.mp4", Title: "Colour Bars Two"}))
+	if err != nil {
+		t.Fatalf("second Ingest: %v", err)
+	}
+	if report != (Report{OK: 1}) {
+		t.Errorf("report = %+v, want the retitle reported as ok", report)
+	}
+	if len(second.prober.calls) != 0 {
+		t.Errorf("a retitle probed the file again: %v", second.prober.calls)
+	}
+
+	got := second.sidecar(t, "trains", "colour-bars")
+	if got.Title != "Colour Bars Two" {
+		t.Errorf("title = %q, want the new configured one", got.Title)
+	}
+	first.Title = got.Title
+	if got.IngestedAt == nil || !got.IngestedAt.Equal(*first.IngestedAt) {
+		t.Errorf("ingested_at = %v, want the first run's %v", got.IngestedAt, first.IngestedAt)
+	}
+	got.IngestedAt, first.IngestedAt = nil, nil
+	if got != first {
+		t.Errorf("a retitle changed more than the title:\ngot  %+v\nwant %+v", got, first)
+	}
+	if !strings.Contains(second.out.String(), "ok     trains/colour-bars  title") {
+		t.Errorf("the retitle was not reported with its reason:\n%s", second.out.String())
+	}
+	if !strings.Contains(logs.String(), "configured title has changed") {
+		t.Errorf("the retitle was not logged:\n%s", logs.String())
+	}
+}
+
+// TestIngestRewritesARemoteTitleWithoutDownloading is the same for a remote
+// item, where the configured title is the only one that can change without a
+// download.
+func TestIngestRewritesARemoteTitleWithoutDownloading(t *testing.T) {
+	captureLogs(t)
+	f := newIngestFixture(t)
+	const source = "https://www.youtube.com/watch?v=zulu001"
+	f.runner.entries[source] = []Entry{{ID: "zulu001", URL: source, Title: "from the playlist"}}
+	f.runner.titles[source] = "Steam Engines of the Rockies"
+
+	if _, err := f.run(trainsChannel(source)); err != nil {
+		t.Fatalf("first Ingest: %v", err)
+	}
+
+	second := newIngestFixture(t)
+	second.root = f.root
+	second.runner.entries[source] = f.runner.entries[source]
+	report, err := second.run(trainsChannelWith(Source{URL: source, Title: "Trains, The Whole Hour"}))
+	if err != nil {
+		t.Fatalf("second Ingest: %v", err)
+	}
+	if report != (Report{OK: 1}) {
+		t.Errorf("report = %+v, want the retitle reported as ok", report)
+	}
+	if got := second.runner.downloads(); len(got) != 0 {
+		t.Errorf("a retitle downloaded the item again: %v", got)
+	}
+	if got := second.sidecar(t, "trains", "zulu001").Title; got != "Trains, The Whole Hour" {
+		t.Errorf("title = %q, want the new configured one", got)
+	}
+}
+
+// TestIngestKeepsARemoteTitleWhenNoneIsConfigured guards the retitle from
+// firing on every run: yt-dlp's title is only known after a download, and the
+// playlist listing carries a different, shorter one.
+func TestIngestKeepsARemoteTitleWhenNoneIsConfigured(t *testing.T) {
+	captureLogs(t)
+	f := newIngestFixture(t)
+	const source = "https://www.youtube.com/watch?v=zulu001"
+	f.runner.entries[source] = []Entry{{ID: "zulu001", URL: source, Title: "from the playlist"}}
+	f.runner.titles[source] = "Steam Engines of the Rockies"
+
+	if _, err := f.run(trainsChannel(source)); err != nil {
+		t.Fatalf("first Ingest: %v", err)
+	}
+
+	second := newIngestFixture(t)
+	second.root = f.root
+	second.runner.entries[source] = f.runner.entries[source]
+	report, err := second.run(trainsChannel(source))
+	if err != nil {
+		t.Fatalf("second Ingest: %v", err)
+	}
+	if report != (Report{Skipped: 1}) {
+		t.Errorf("report = %+v, want one skip", report)
+	}
+	if got := second.sidecar(t, "trains", "zulu001").Title; got != "Steam Engines of the Rockies" {
+		t.Errorf("title = %q, want the one yt-dlp reported", got)
+	}
+}
+
+// TestIngestDryRunWritesNoTitle keeps --dry-run honest: it never writes, so a
+// title change is reported as the skip it is until a real run happens.
+func TestIngestDryRunWritesNoTitle(t *testing.T) {
+	captureLogs(t)
+	f := newIngestFixture(t)
+	video := filepath.Join(f.root, "local", "colour-bars.mp4")
+	copyTinyMP4(t, video)
+
+	if _, err := f.run(trainsChannel("local/colour-bars.mp4")); err != nil {
+		t.Fatalf("first Ingest: %v", err)
+	}
+
+	second := newIngestFixture(t)
+	second.root = f.root
+	retitled := trainsChannelWith(Source{URL: "local/colour-bars.mp4", Title: "Colour Bars Two"})
+	report, err := second.run(retitled, func(o *IngestOptions) {
+		o.DryRun = true
+		o.Prober = nil
+	})
+	if err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+	if report != (Report{Skipped: 1}) {
+		t.Errorf("report = %+v, want one skip", report)
+	}
+	if got := second.sidecar(t, "trains", "colour-bars").Title; got != "colour bars" {
+		t.Errorf("a dry run rewrote the sidecar title to %q", got)
+	}
+}
+
+// TestIngestedLibraryMovesBetweenRoots is the Mac-to-Pi rsync: a library
+// ingested under one root, copied to another, plays from the new one. Nothing
+// is ingested again and no path in the sidecars names the old root.
+func TestIngestedLibraryMovesBetweenRoots(t *testing.T) {
+	captureLogs(t)
+	f := newIngestFixture(t)
+	copyTinyMP4(t, filepath.Join(f.root, "local", "steam-engines.mp4"))
+	const remote = "https://www.youtube.com/watch?v=zulu001"
+	f.runner.entries[remote] = []Entry{{ID: "zulu001", URL: remote, Title: "Steam Engines"}}
+	f.runner.titles[remote] = "Steam Engines of the Rockies"
+
+	channels := trainsChannelWith(
+		Source{URL: "local/steam-engines.mp4", Title: "Steam Engines At Home"},
+		Source{URL: remote},
+	)
+	if _, err := f.run(channels); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+
+	// rsync of <root>/library and <root>/local onto the other machine.
+	other := t.TempDir()
+	for _, dir := range []string{"library", "local"} {
+		copyTree(t, filepath.Join(f.root, dir), filepath.Join(other, dir))
+	}
+
+	index, err := Scan(other, channels)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	items := index.Items("trains")
+	if len(items) != 2 {
+		t.Fatalf("got %d items under the new root, want 2: %+v", len(items), items)
+	}
+	for _, item := range items {
+		if !strings.HasPrefix(item.Path, other+string(filepath.Separator)) {
+			t.Errorf("item %s plays from %q, which is not under the new root %q", item.ID, item.Path, other)
+		}
+		if !isRegularFile(item.Path) {
+			t.Errorf("item %s names %q, which is not there", item.ID, item.Path)
+		}
+	}
+	if items[0].Title != "Steam Engines At Home" {
+		t.Errorf("title = %q, want the configured one to have travelled", items[0].Title)
+	}
+}
+
+// copyTree copies a directory recursively, which is what the rsync in
+// deploy/README.md does between the Mac and the Pi.
+func copyTree(t *testing.T, from, to string) {
+	t.Helper()
+	err := filepath.WalkDir(from, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(from, path)
+		if err != nil {
+			return err
+		}
+		dest := filepath.Join(to, rel)
+		if entry.IsDir() {
+			return os.MkdirAll(dest, 0o755)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(dest, data, 0o644)
+	})
+	if err != nil {
+		t.Fatalf("copy %s to %s: %v", from, to, err)
 	}
 }

@@ -4,3 +4,6 @@ name: Train TV
 sources:
   - https://www.youtube.com/watch?v=dQw4w9WgXcQ
   - file:///srv/channel3/local/steam-engines.mp4
+  - local/branch-line.mp4
+  - source: local/shunting_yard.mp4
+    title: Shunting Yard

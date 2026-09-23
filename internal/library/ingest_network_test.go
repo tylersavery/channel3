@@ -42,7 +42,7 @@ func TestIngestNetwork(t *testing.T) {
 	}
 
 	root := t.TempDir()
-	channels := []Channel{{ID: "space", Number: 12, Name: "Space Channel", Sources: []string{source}}}
+	channels := []Channel{{ID: "space", Number: 12, Name: "Space Channel", Sources: []Source{{URL: source}}}}
 	var out bytes.Buffer
 
 	report, err := Ingest(IngestOptions{

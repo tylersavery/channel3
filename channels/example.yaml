@@ -8,13 +8,17 @@
 # id: lowercase letters, digits and dashes. It names the library directory at <root>/library/<id>.
 # number: 1 to 999. This is what you type on the remote.
 # name: what the guide shows.
-# sources: youtube video URLs, playlist URLs, any other URL yt-dlp accepts, and file:// paths to video already on disk.
+# sources: one entry per video, playlist or file. An entry takes any of the three forms below.
 # A channel with no sources is allowed. It shows the Please Stand By card until you give it something to play.
 
 id: trains
 number: 3
 name: Train TV
 sources:
+  # A URL. YouTube videos and playlists, and anything else yt-dlp accepts. The video is downloaded into <root>/library/<id> and the title comes from yt-dlp.
   - https://www.youtube.com/watch?v=dQw4w9WgXcQ
-  - https://www.youtube.com/playlist?list=PLxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-  - file:///srv/channel3/local/steam-engines.mp4
+  # A path relative to the root, for video you put under <root>/local yourself. It is never copied, and the sidecar records it relatively, so the library plays the same on the Mac and on the Pi. The title is the file name without its extension, with hyphens and underscores read as spaces.
+  - local/steam-engines.mp4
+  # The same, with the guide title written out. A mapping takes a source in any of these forms and an optional title, which overrides both the file name and what yt-dlp reports.
+  - source: local/shunting_yard_1972.mp4
+    title: Shunting Yard, 1972
