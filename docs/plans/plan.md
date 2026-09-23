@@ -365,7 +365,8 @@ Prove on the real Pi 5, before any Pi-dependent code is written, that mpv can dr
 ### Input
 
 - Brainstorm "Risks" and "Testing: Hardware checklist".
-- Hardware from Smitty task #251: Pi 5 4 GB, cooler, supply, NVMe HAT or USB SSD, micro-HDMI cable, Flirc USB, remote. TV CEC check is Smitty task #252.
+- Hardware from Smitty task #251: Pi 5 4 GB, official case with fan, 27 W supply, microSD for the OS, a 1 or 2 TB USB SSD for the library (ruled 2026-09-23: no NVMe HAT, no NAS), micro-HDMI cable, Flirc USB, Flipper Big Button remote, RTC coin cell.
+- The TV is a Samsung UN40H4005AF (2014 H4005 series): 720p panel at 1366x768, two HDMI ports, Anynet+ (HDMI-CEC) listed in its spec and off by default. Enable it under Menu, System, Anynet+ before the CEC tasks. Ingest stays capped at 1080p for a future TV; if H.264 decode headroom is thin, a 720p cap costs nothing visible on this set.
 - Raspberry Pi OS Lite (Trixie, Debian 13) ships mpv 0.40. Homebrew on the Mac also ships 0.40. Forum reports on Trixie show mpv's default Vulkan path failing at 1080p and `--gpu-api=opengl` fixing it. Pi 5 has no H.264 hardware decoder; H.264 is software decoded and HEVC is the only hardware codec.
 
 ### Files
@@ -871,8 +872,8 @@ Decisions this plan made where the brainstorm was silent. Each is a reasonable d
 
 Open questions that stay open and do not block:
 
-- Does the TV support CEC? Smitty #252, answered in Phase 4.
-- NVMe HAT or USB SSD? Decided at purchase; Phase 9's `RequiresMountsFor` covers either.
+- Does the TV support CEC? Its spec says Anynet+ yes (Samsung UN40H4005AF). Phase 4 confirms it works with cec-ctl.
+- NVMe HAT or USB SSD? Ruled 2026-09-23: USB SSD, 1 or 2 TB, no NAS. Phase 9's `RequiresMountsFor` covers either.
 - Is 1080p H.264 software decode smooth enough on the Pi 5? Phase 4 measures; the fallback is a 720p ingest cap.
 - Which remote buttons can Flirc record as which keys? Phase 4 records the table.
 - GitHub org and module path, if the framework goes public later.
