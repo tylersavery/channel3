@@ -15,7 +15,7 @@ What Phase 4 found on the real Pi and TV. Every flag in `/etc/default/channel3` 
 - `mpv v0.40.0` from apt.
 - Output flags: **`--vo=gpu --gpu-context=drm --gpu-api=opengl --hwdec=no`** (Try A, the first candidate). Tested 2026-10-05 on a stand-in Samsung 1080p monitor on HDMI 0 (`card1-HDMI-A-1`): full screen at 1920x1080@60, 0 dropped frames over 30 s of 1080p H.264, about 40% of one core, 50 °C with the fan at about 1,650 RPM. Tries B and C were not needed. Recheck on the Samsung UN40H4005AF, which is a 720p panel.
 - Service flag set (step 12): `--no-osc --no-osd-bar --no-input-default-bindings --idle=yes --hr-seek=yes --image-display-duration=inf --input-ipc-server=...` work with the output flags. The IPC socket answered `get_property mpv-version`, and a `loadfile ... start=45` landed at 45.000 s in 154 ms.
-- Live in `/etc/default/channel3` since 2026-10-05: `CHANNEL3_FLAGS="--mpv-arg=--vo=gpu --mpv-arg=--gpu-context=drm --mpv-arg=--gpu-api=opengl --mpv-arg=--hwdec=no"`.
+- Live in `/etc/default/channel3` since 2026-10-05: `CHANNEL3_FLAGS="--mpv-arg=--vo=gpu --mpv-arg=--gpu-context=drm --mpv-arg=--gpu-api=opengl --mpv-arg=--hwdec=no --mpv-arg=--ao=alsa --mpv-arg=--audio-fallback-to-null=yes"`. The two audio flags were added after the first cold boot (see Boot time).
 
 ## Playback
 
@@ -92,12 +92,21 @@ Not plugged in yet. `/sys/class/rtc/rtc0/battery_voltage` reads 0.
 
 ## Boot time
 
-**Not tested yet.**
+- First cold boot, 2026-10-05: the service started at 4.8 s and loaded the first item at 6.4 s after the kernel. mpv then failed with `audio output initialization failed` because the sound card was not ready, and refused every following file with `no audio or video data played`. The station excluded all four items, then spun on a refused stand by card about 50 times a second (16,410 log lines in three minutes). The screen stayed dark until the service was restarted.
+- Fixed twice. In the flags: `--ao=alsa --audio-fallback-to-null=yes` (see `deploy/channel3.env.example`). In code, `795a558`: a second failure before anything has played is blamed on the player and retried at the next reconcile tick, and a refused card waits for the tick too.
+- Boots after the fix: video at about 7.2 s after the kernel (`systemd-analyze`: 2.4 s kernel + 12.8 s userspace = 15.1 s to finish). The user timed **about 8 s from power to video** on the stand-in monitor. Eight to fifteen log lines per boot.
+- A reboot with the audio flags removed did not reproduce the race (audio was ready in time), so the code fix is proven by its tests (`TestFailuresBeforeAnythingPlaysAreBlamedOnThePlayer` and `TestStandbyFailureDoesNotSpin` fail on the old code) rather than on hardware.
+- `NetworkManager-wait-online` takes 6 s but nothing in the unit waits on it.
 
 ## Console
 
-**Not tested yet** (needs HDMI).
+- `quiet loglevel=0 logo.nologo vt.global_cursor_default=0 consoleblank=0` from `pi-setup.sh` hides the kernel and systemd text.
+- **cloud-init** (Imager 2 seeds first-boot settings through it, `ds=nocloud` on the command line) runs every boot and tees its output to the console regardless of `quiet`, for example "Completed socket interaction for boot stage final". Fixed on this Pi with `/etc/cloud/cloud.cfg.d/99_channel3_quiet.cfg` containing `output: {all: ">> /var/log/cloud-init-output.log"}`. Wi-Fi lives in NetworkManager's netplan files, not cloud-init's. `pi-setup.sh` does not do this yet.
+- The firmware boot screen (bootloader diagnostics, plus the network-install prompt) is off via EEPROM: `DISABLE_HDMI=1` and `NET_INSTALL_AT_POWER_ON=0`, applied with `rpi-eeprom-config --apply` on 2026-10-05. The rest of the EEPROM config is unchanged (`BOOT_UART=1`, `BOOT_ORDER=0xf461`). A firmware update is available and was not applied. To get the boot screen back, set `DISABLE_HDMI=0`. `pi-setup.sh` does not do this either.
 
 ## Open issues
 
-None so far.
+- On/Off on the remote sends nothing (see Flirc key table).
+- A Flirc plugged in after the service starts is not picked up until a restart.
+- `pi-setup.sh` does not yet quiet cloud-init or set the EEPROM options above. A fresh install needs them by hand.
+- The drive's spin-down timer cannot be set.

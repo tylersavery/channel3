@@ -427,14 +427,15 @@ The file explains every option in comments. **Do not uncomment those lines.** Ed
 Build it from your notes:
 
 - **mpv output (step 10):** for Try A, add `--mpv-arg=--vo=gpu --mpv-arg=--gpu-context=drm --mpv-arg=--gpu-api=opengl --mpv-arg=--hwdec=no`
-- **Audio (step 11):** only if the default was wrong, add `--mpv-arg=--audio-device=alsa/sysdefault:CARD=vc4hdmi0`
+- **Audio, always:** add `--mpv-arg=--ao=alsa --mpv-arg=--audio-fallback-to-null=yes`. Without them, a cold boot can start the service before the sound card is ready, and mpv then refuses to play.
+- **Audio device (step 11):** only if the default was wrong, add `--mpv-arg=--audio-device=alsa/sysdefault:CARD=vc4hdmi0`
 - **Remote (step 15):** add `--input-device=/dev/input/by-id/<the flirc entry>`
 - **CEC (step 16):** only if CEC was yes, add `--cec`
 
 A finished line looks like this:
 
 ```
-CHANNEL3_FLAGS="--mpv-arg=--vo=gpu --mpv-arg=--gpu-context=drm --mpv-arg=--gpu-api=opengl --mpv-arg=--hwdec=no --input-device=/dev/input/by-id/usb-flirc.tv_flirc-event-kbd --cec"
+CHANNEL3_FLAGS="--mpv-arg=--vo=gpu --mpv-arg=--gpu-context=drm --mpv-arg=--gpu-api=opengl --mpv-arg=--hwdec=no --mpv-arg=--ao=alsa --mpv-arg=--audio-fallback-to-null=yes --cec"
 ```
 
 Do not add `--root` or `--listen`. The unit already sets them. No single flag may contain a space.
