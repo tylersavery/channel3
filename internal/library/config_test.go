@@ -3,6 +3,7 @@ package library
 import (
 	"bytes"
 	"errors"
+	"image/color"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -408,5 +409,49 @@ func TestExampleConfigLoads(t *testing.T) {
 	}
 	if channels[0].ID != "trains" || channels[0].Number != 3 {
 		t.Errorf("example channel = %+v", channels[0])
+	}
+}
+
+func TestLoadChannelsBumper(t *testing.T) {
+	captureLogs(t)
+	const head = "id: farm\nnumber: 3\nname: FarmTV\nsources: []\n"
+
+	cases := []struct {
+		name, bumper string
+		want         *Bumper
+		wantErr      string
+	}{
+		{"absent", "", nil, ""},
+		{"icon and colour", "bumper:\n  icon: tractor.svg\n  color: \"#E8A33D\"\n",
+			&Bumper{Icon: "tractor.svg", Color: color.RGBA{R: 0xE8, G: 0xA3, B: 0x3D, A: 0xff}}, ""},
+		{"colour alone", "bumper:\n  color: \"#1a2b3c\"\n",
+			&Bumper{Color: color.RGBA{R: 0x1a, G: 0x2b, B: 0x3c, A: 0xff}}, ""},
+		{"missing colour", "bumper:\n  icon: tractor.svg\n", nil, "bumper.color"},
+		{"short colour", "bumper:\n  color: \"#E8A\"\n", nil, "#RRGGBB"},
+		{"named colour", "bumper:\n  color: orange\n", nil, "#RRGGBB"},
+		{"icon with a path", "bumper:\n  icon: ../tractor.svg\n  color: \"#E8A33D\"\n", nil, "bumper.icon"},
+		{"icon that is not svg", "bumper:\n  icon: tractor.png\n  color: \"#E8A33D\"\n", nil, "bumper.icon"},
+		{"unknown field", "bumper:\n  colour: \"#E8A33D\"\n", nil, "bumper.colour"},
+		{"not a mapping", "bumper: tractor.svg\n", nil, "must be a mapping"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeConfig(t, dir, "farm.yaml", head+tc.bumper)
+			channels, err := LoadChannels(dir)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("error = %v, want one mentioning %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LoadChannels: %v", err)
+			}
+			got := channels[0].Bumper
+			if (got == nil) != (tc.want == nil) || (got != nil && *got != *tc.want) {
+				t.Errorf("bumper = %+v, want %+v", got, tc.want)
+			}
+		})
 	}
 }

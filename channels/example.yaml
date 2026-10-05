@@ -9,11 +9,15 @@
 # number: 1 to 999. This is what you type on the remote.
 # name: what the guide shows.
 # sources: one entry per video, playlist or file. An entry takes any of the three forms below.
+# bumper: optional. The card shown for a moment after tuning here: a background colour written as #RRGGBB, and optionally the name of an SVG icon in <root>/icons. Leave it out for no card.
 # A channel with no sources is allowed. It shows the Please Stand By card until you give it something to play.
 
 id: trains
 number: 3
 name: Train TV
+bumper:
+  icon: steam-engine.svg
+  color: "#2E6DB4"
 sources:
   # A URL. YouTube videos and playlists, and anything else yt-dlp accepts. The video is downloaded into <root>/library/<id> and the title comes from yt-dlp.
   - https://www.youtube.com/watch?v=dQw4w9WgXcQ

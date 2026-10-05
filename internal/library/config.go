@@ -6,6 +6,7 @@
 // Pi and ~/srv/channel3 on the Mac. The layout is:
 //
 //	<root>/channels/<anything>.yaml   one channel per file
+//	<root>/icons/<name>.svg           bumper icons the channel files name
 //	<root>/library/<channel-id>/      that channel's media and sidecars
 //	<root>/local/                     video that was never downloaded
 //
@@ -18,12 +19,14 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"image/color"
 	"log/slog"
 	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -36,6 +39,35 @@ type Channel struct {
 	Number  int
 	Name    string
 	Sources []Source
+	// Bumper is the card shown after tuning to the channel. Nil means the
+	// channel has none.
+	Bumper *Bumper
+}
+
+// Bumper is a channel's card: its colour and, optionally, an icon.
+type Bumper struct {
+	// Icon is an SVG file name under <root>/icons, or "" for a card with the
+	// channel name alone.
+	Icon string
+	// Color is the card's background.
+	Color color.RGBA
+}
+
+// bumperFile is the YAML shape of a channel's bumper block.
+type bumperFile struct {
+	Icon  string `yaml:"icon"`
+	Color string `yaml:"color"`
+}
+
+// bumperFields are the only keys a bumper block may contain.
+var bumperFields = []string{"icon", "color"}
+
+// colorPattern is the accepted bumper colour, #RRGGBB.
+var colorPattern = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
+
+// IconsDir returns the directory holding bumper icons under root.
+func IconsDir(root string) string {
+	return filepath.Join(root, "icons")
 }
 
 // Source is one entry of a channel's sources list.
@@ -104,14 +136,15 @@ func (s *Source) unmarshalMapping(node *yaml.Node) error {
 
 // channelFile is the YAML shape of one channel config file.
 type channelFile struct {
-	ID      string   `yaml:"id"`
-	Number  int      `yaml:"number"`
-	Name    string   `yaml:"name"`
-	Sources []Source `yaml:"sources"`
+	ID      string    `yaml:"id"`
+	Number  int       `yaml:"number"`
+	Name    string    `yaml:"name"`
+	Sources []Source  `yaml:"sources"`
+	Bumper  yaml.Node `yaml:"bumper"`
 }
 
 // configFields are the only keys a channel config file may contain.
-var configFields = []string{"id", "number", "name", "sources"}
+var configFields = []string{"id", "number", "name", "sources", "bumper"}
 
 // idPattern is the accepted channel id. It doubles as a directory name under
 // <root>/library, which is why it stays this narrow.
@@ -285,8 +318,78 @@ func readChannelFile(path, name string) (Channel, uniqueness, []error) {
 		slog.Warn("channel has no sources and will show the Please Stand By card", "file", name, "id", raw.ID)
 	}
 
-	ch := Channel{ID: raw.ID, Number: raw.Number, Name: raw.Name, Sources: raw.Sources}
+	bumper, bumperErrs := readBumper(raw.Bumper, name)
+	errs = append(errs, bumperErrs...)
+
+	ch := Channel{ID: raw.ID, Number: raw.Number, Name: raw.Name, Sources: raw.Sources, Bumper: bumper}
 	return ch, uniqueness{id: idValid, number: numberValid}, errs
+}
+
+// readBumper validates a channel's bumper block. An absent block is no bumper
+// and no error.
+//
+// Whether the icon file exists is not checked here: icons are synced beside the
+// channel files, and a missing one costs the card its picture, not the channel
+// its place on the air.
+func readBumper(node yaml.Node, file string) (*Bumper, []error) {
+	if node.Kind == 0 {
+		return nil, nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return nil, []error{&ConfigError{File: file, Field: "bumper", Msg: "must be a mapping of " + strings.Join(bumperFields, " and ")}}
+	}
+
+	var errs []error
+	var keys map[string]yaml.Node
+	if err := node.Decode(&keys); err != nil {
+		return nil, []error{&ConfigError{File: file, Field: "bumper", Msg: err.Error()}}
+	}
+	for _, key := range slices.Sorted(maps.Keys(keys)) {
+		if !slices.Contains(bumperFields, key) {
+			errs = append(errs, &ConfigError{
+				File:  file,
+				Field: "bumper." + key,
+				Msg:   fmt.Sprintf("unknown field, expected one of %s", strings.Join(bumperFields, ", ")),
+			})
+		}
+	}
+
+	var raw bumperFile
+	if err := node.Decode(&raw); err != nil {
+		return nil, append(errs, &ConfigError{File: file, Field: "bumper", Msg: err.Error()})
+	}
+	background, colorOK := parseHexColor(raw.Color)
+	if !colorOK {
+		errs = append(errs, &ConfigError{
+			File:  file,
+			Field: "bumper.color",
+			Msg:   fmt.Sprintf("%q must be a colour written as #RRGGBB, such as #E8A33D", raw.Color),
+		})
+	}
+	icon := strings.TrimSpace(raw.Icon)
+	if icon != "" && (filepath.Base(icon) != icon || filepath.Ext(icon) != ".svg" || strings.HasPrefix(icon, ".")) {
+		errs = append(errs, &ConfigError{
+			File:  file,
+			Field: "bumper.icon",
+			Msg:   fmt.Sprintf("%q must be the name of an .svg file in the icons directory, such as tractor.svg", raw.Icon),
+		})
+	}
+	if len(errs) > 0 {
+		return nil, errs
+	}
+	return &Bumper{Icon: icon, Color: background}, nil
+}
+
+// parseHexColor reads a #RRGGBB colour and reports whether it was one.
+func parseHexColor(hex string) (color.RGBA, bool) {
+	if !colorPattern.MatchString(hex) {
+		return color.RGBA{}, false
+	}
+	rgb, err := strconv.ParseUint(hex[1:], 16, 32)
+	if err != nil {
+		return color.RGBA{}, false
+	}
+	return color.RGBA{R: uint8(rgb >> 16), G: uint8(rgb >> 8), B: uint8(rgb), A: 0xff}, true
 }
 
 // sourceProblem returns why src cannot be used as a source, or "" when it can.
