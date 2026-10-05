@@ -16,7 +16,9 @@
 # there, though its downloaded videos stay on the drive. It defaults to
 # ~/srv/channel3/channels and CHANNEL3_CHANNELS overrides it. settings.yaml
 # beside that directory is mirrored the same way: copied when it exists here,
-# removed there when it does not, which puts the Pi back on the defaults.
+# removed there when it does not, which puts the Pi back on the defaults. The
+# icons directory beside it, which holds the channels' bumper icons, is mirrored
+# like the channel files, .svg files only.
 #
 # Ingesting on the Mac into ~/srv/channel3 and rsyncing the library to the Pi is
 # the no-downtime route.
@@ -98,6 +100,14 @@ printf '==> syncing channel configs from %s\n' "$LOCAL_CHANNELS"
 rsync -rt --delete --itemize-changes --include='*.yaml' --exclude='*' \
 	--rsync-path="sudo -u channel3 rsync" \
 	"$LOCAL_CHANNELS/" "$PI_HOST:$REMOTE_ROOT/channels/"
+
+local_icons="$(dirname "$LOCAL_CHANNELS")/icons"
+if [ -d "$local_icons" ]; then
+	printf '==> syncing icons from %s\n' "$local_icons"
+	rsync -rt --delete --itemize-changes --include='*.svg' --exclude='*' \
+		--rsync-path="sudo -u channel3 rsync" \
+		"$local_icons/" "$PI_HOST:$REMOTE_ROOT/icons/"
+fi
 
 local_settings="$(dirname "$LOCAL_CHANNELS")/settings.yaml"
 if [ -f "$local_settings" ]; then
