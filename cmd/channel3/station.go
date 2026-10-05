@@ -78,6 +78,26 @@ type station struct {
 	// stalled says the station has declined to reload a file that keeps
 	// failing and is waiting for the next reconcile tick.
 	stalled bool
+	// standbyFailed says mpv refused the stand by card. The station waits for
+	// the next reconcile tick to show it again rather than retrying at once.
+	standbyFailed bool
+	// streak is the items excluded since the player last showed it could play
+	// something, as channel id and item id. A second failure in one streak is
+	// blamed on the player: the streak is forgiven and the station waits.
+	streak []excludedItem
+	// suspect says a streak was blamed on the player and the station is waiting
+	// for the next reconcile tick to try again.
+	suspect bool
+	// retried says that tick has come and gone. A failure after it is believed,
+	// because a player that is still failing half a minute later is failing on
+	// the files, not on a sound card that was not ready.
+	retried bool
+}
+
+// excludedItem names one item excluded for the day.
+type excludedItem struct {
+	channel string
+	item    string
 }
 
 // stationOptions are what serve hands the station.
@@ -497,8 +517,11 @@ func (s *station) sendControl(k input.Key) {
 func (s *station) handle(ev player.Event) {
 	switch ev.Kind {
 	case player.EndFile:
-		if ev.Reason == player.ReasonError && !s.exclude(ev.Path) && s.repeatingFailure() {
+		if ev.Reason == player.ReasonError && s.failed(ev.Path) {
 			return
+		}
+		if ev.Reason == player.ReasonEOF {
+			s.playedOK()
 		}
 		// Both reasons end the same way: ask the schedule what is on now
 		// rather than playing whatever came next in the list. The schedule is
@@ -510,6 +533,70 @@ func (s *station) handle(ev player.Event) {
 	default:
 		s.log.Warn("ignoring an unknown player event", "kind", ev.Kind)
 	}
+}
+
+// failed handles an error event for path and reports whether the station
+// should wait for the next reconcile tick instead of loading again at once.
+//
+// One failure is the file's fault and the item is excluded. A second failure
+// before anything has played is the player's fault: on a cold boot mpv can come
+// up before the sound card and then refuses every file it is handed, and
+// believing it would exclude the whole channel for the day. So the streak is
+// forgiven and the station waits. If the retry at the next tick fails too, the
+// files really are bad and are excluded as they fail.
+func (s *station) failed(path string) bool {
+	if s.lastLoad == "" && !s.onTunedChannel(path) {
+		// The last thing handed to mpv was the stand by card, and mpv refused
+		// it. Showing it again at once would fail again at once.
+		if !s.standbyFailed {
+			s.log.Error("the player cannot show the stand by card, waiting for the next reconcile",
+				"path", path, "retry in", s.interval)
+		}
+		s.standbyFailed = true
+		return true
+	}
+	if (len(s.streak) > 0 || s.suspect) && !s.retried {
+		if !s.suspect {
+			s.log.Warn("a second item failed before anything played, blaming the player rather than the files and waiting for the next reconcile",
+				"path", path, "forgiven", len(s.streak), "retry in", s.interval)
+			s.forgiveStreak()
+		}
+		s.suspect = true
+		return true
+	}
+	if !s.exclude(path) {
+		return s.repeatingFailure()
+	}
+	return false
+}
+
+// playedOK records that the player has just shown it can play a file, which
+// ends any streak of failures.
+func (s *station) playedOK() {
+	s.streak = nil
+	s.suspect = false
+	s.retried = false
+}
+
+// forgiveStreak lifts the exclusions made since the player last played
+// something.
+func (s *station) forgiveStreak() {
+	s.mu.Lock()
+	for _, e := range s.streak {
+		delete(s.excluded[e.channel], e.item)
+	}
+	s.mu.Unlock()
+	s.streak = nil
+}
+
+// onTunedChannel reports whether path is one of the tuned channel's items.
+func (s *station) onTunedChannel(path string) bool {
+	channel, ok := s.channel(s.tuned)
+	if !ok {
+		return false
+	}
+	_, ok = findByPath(channel.Items, path)
+	return ok
 }
 
 // exclude drops the item at path from the tuned channel for the rest of the
@@ -542,6 +629,7 @@ func (s *station) exclude(path string) bool {
 	}
 	s.excluded[s.tuned][item.ID] = true
 	s.mu.Unlock()
+	s.streak = append(s.streak, excludedItem{channel: s.tuned, item: item.ID})
 
 	s.log.Warn("dropping an unplayable item for the rest of the day",
 		"channel", s.tuned, "item", item.ID, "title", item.Title, "path", item.Path)
@@ -626,6 +714,7 @@ func (s *station) play() {
 func (s *station) standby() error {
 	s.lastKnown = false
 	s.lastLoad = ""
+	s.standbyFailed = false
 	return s.player.Standby()
 }
 
@@ -655,6 +744,11 @@ func (s *station) reconcile() {
 		// the library is rescanned.
 		return
 	}
+	if s.suspect {
+		// This tick is the retry a suspect streak was waiting for. Whatever
+		// fails after it is believed.
+		s.retried = true
+	}
 	channel, ok := s.channel(s.tuned)
 	if !ok {
 		s.play()
@@ -662,7 +756,7 @@ func (s *station) reconcile() {
 	}
 	slot, ok := schedule.At(s.playable(channel), now, s.clock)
 	if !ok {
-		if s.lastKnown {
+		if s.lastKnown || s.standbyFailed {
 			s.log.Info("nothing left to play, showing stand by", "channel", channel.ID)
 			s.standbyOrLog()
 		}
@@ -685,7 +779,11 @@ func (s *station) reconcile() {
 		s.log.Info("the player has drifted from the schedule, reloading",
 			"item", slot.Item.ID, "drift", drift.Round(time.Millisecond))
 		s.play()
+		return
 	}
+	// mpv is on the scheduled item at the scheduled point, which is proof it
+	// can play.
+	s.playedOK()
 }
 
 // rollover starts a new broadcast day: rescan the library, rebuild the
@@ -695,6 +793,7 @@ func (s *station) rollover(day time.Time) {
 	s.mu.Lock()
 	s.excluded = make(map[string]map[string]bool)
 	s.mu.Unlock()
+	s.playedOK()
 
 	// The day is advanced only once the rescan has worked. A library that is
 	// briefly unreadable at 04:00 is then retried on the next reconcile tick

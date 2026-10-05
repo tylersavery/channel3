@@ -292,23 +292,114 @@ func TestErrorExcludesTheItemForTheDay(t *testing.T) {
 	}
 }
 
+// failLast reports the item the station last loaded as unplayable, the way mpv
+// does: an error end-file, after which mpv sits idle on nothing.
+func failLast(t *testing.T, s *station, p *fakePlayer) {
+	t.Helper()
+	path := p.LastLoad(t).Path
+	p.SetPosition("", 0)
+	s.handle(player.Event{Kind: player.EndFile, Reason: player.ReasonError, Path: path})
+}
+
 // TestEveryItemExcludedShowsStandby is the end of the road for a channel whose
-// files are all unplayable: the card, and a service that stays up.
+// files are all unplayable: the card, and a service that stays up. The second
+// failure is first blamed on the player, so the files are only believed bad
+// once they still fail at the next reconcile tick.
 func TestEveryItemExcludedShowsStandby(t *testing.T) {
 	p := newFakePlayer()
 	clock := &fakeClock{now: noon()}
 	channels := testChannels()
 	s := newTestStation(t, p, clock, "clips", channels)
 
+	s.play()
+	failLast(t, s, p)
+	failLast(t, s, p)
+	s.reconcile()
+
 	for range len(channels[0].Items) {
-		s.play()
-		s.handle(player.Event{Kind: player.EndFile, Reason: player.ReasonError, Path: p.LastLoad(t).Path})
+		if p.Standbys() > 0 {
+			break
+		}
+		failLast(t, s, p)
 	}
 
-	before := p.Standbys()
+	if p.Standbys() == 0 {
+		t.Fatal("a channel of unplayable files never reached the card")
+	}
+	if got, want := len(s.excluded["clips"]), len(channels[0].Items); got != want {
+		t.Errorf("%d items excluded, want all %d", got, want)
+	}
+}
+
+// TestFailuresBeforeAnythingPlaysAreBlamedOnThePlayer is a cold boot where mpv
+// came up before the sound card and refused every file. Believing it would
+// exclude the whole channel for the day and leave the television dark.
+func TestFailuresBeforeAnythingPlaysAreBlamedOnThePlayer(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	channels := testChannels()
+	s := newTestStation(t, p, clock, "clips", channels)
+
 	s.play()
-	if p.Standbys() != before+1 {
-		t.Errorf("the card was shown %d times, want one more than %d", p.Standbys(), before)
+	first := p.LastLoad(t).Path
+	failLast(t, s, p)
+	if !s.excluded["clips"][itemIDForPath(t, channels[0], first)] {
+		t.Fatal("a single failure did not exclude the item")
+	}
+
+	failLast(t, s, p)
+	loads := len(p.Loads())
+	for range 5 {
+		s.handle(player.Event{Kind: player.EndFile, Reason: player.ReasonError, Path: p.LastLoad(t).Path})
+	}
+	if got := len(s.excluded["clips"]); got != 0 {
+		t.Errorf("%d items still excluded after the streak was blamed on the player", got)
+	}
+	if got := len(p.Loads()); got != loads {
+		t.Errorf("the station loaded %d more times while waiting, want none", got-loads)
+	}
+
+	// The sound card is ready by the next tick and the scheduled item plays,
+	// the one that failed first included.
+	s.reconcile()
+	want := wantSlot(t, channels[0], clock.Now())
+	if got := p.LastLoad(t); got.Path != want.Item.Path {
+		t.Errorf("the retry loaded %s, want the scheduled %s", got.Path, want.Item.Path)
+	}
+
+	// The item plays out, which proves the player works, so the next lone
+	// failure is a file's fault again and is excluded at once.
+	s.handle(player.Event{Kind: player.EndFile, Reason: player.ReasonEOF, Path: p.LastLoad(t).Path})
+	broken := p.LastLoad(t).Path
+	failLast(t, s, p)
+	if !s.excluded["clips"][itemIDForPath(t, channels[0], broken)] {
+		t.Error("a failure after healthy playback was not excluded")
+	}
+	if got := p.LastLoad(t).Path; got == broken {
+		t.Errorf("reloaded the broken item %s", got)
+	}
+}
+
+// TestStandbyFailureDoesNotSpin is mpv refusing the card itself. Each refusal
+// used to show the card again at once, fifty times a second, until the day
+// rolled over.
+func TestStandbyFailureDoesNotSpin(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := newTestStation(t, p, clock, "empty", testChannels())
+
+	s.play()
+	shown := p.Standbys()
+	for range 20 {
+		s.handle(player.Event{Kind: player.EndFile, Reason: player.ReasonError, Path: "/run/channel3/standby.png"})
+	}
+	if got := p.Standbys(); got != shown {
+		t.Fatalf("the card was shown %d more times after failing, want none until the next tick", got-shown)
+	}
+
+	s.reconcile()
+	if got := p.Standbys(); got != shown+1 {
+		t.Errorf("the next tick showed the card %d more times, want exactly one retry", got-shown)
 	}
 }
 
