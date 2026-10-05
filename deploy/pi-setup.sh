@@ -24,7 +24,15 @@ YTDLP_URL="${YTDLP_RELEASE}/${YTDLP_ASSET}"
 YTDLP_SUMS_URL="${YTDLP_RELEASE}/SHA2-256SUMS"
 YTDLP_PATH="/usr/local/bin/yt-dlp"
 
-APT_PACKAGES=(mpv v4l-utils ffmpeg rsync)
+# Deno is the JavaScript runtime yt-dlp needs to answer YouTube's player
+# challenge. Without one, YouTube reports every video as "not available".
+# Pinned and checksummed the same way as yt-dlp.
+DENO_VERSION="2.9.7"
+DENO_ASSET="deno-aarch64-unknown-linux-gnu.zip"
+DENO_RELEASE="https://github.com/denoland/deno/releases/download/v${DENO_VERSION}"
+DENO_PATH="/usr/local/bin/deno"
+
+APT_PACKAGES=(mpv v4l-utils ffmpeg rsync unzip)
 SERVICE_USER="channel3"
 SERVICE_GROUPS=(video render input audio)
 ROOT_DIR="/srv/channel3"
@@ -182,6 +190,36 @@ else
 	rm -f "$tmp_ytdlp" "$tmp_sums"
 	trap - EXIT
 	note_changed "yt-dlp $YTDLP_VERSION at $YTDLP_PATH, checksum verified (was ${installed_ytdlp:-absent})"
+fi
+
+# --- deno -------------------------------------------------------------------
+installed_deno=""
+if [ -x "$DENO_PATH" ]; then
+	installed_deno="$("$DENO_PATH" --version 2>/dev/null | awk 'NR == 1 { print $2 }' || true)"
+fi
+if [ "$installed_deno" = "$DENO_VERSION" ]; then
+	note_ok "deno $DENO_VERSION"
+else
+	tmp_deno="$(mktemp -d)"
+	trap 'rm -rf "$tmp_deno"' EXIT
+	curl -fsSL -o "$tmp_deno/$DENO_ASSET" "$DENO_RELEASE/$DENO_ASSET" ||
+		die "could not download $DENO_RELEASE/$DENO_ASSET"
+	curl -fsSL -o "$tmp_deno/$DENO_ASSET.sha256sum" "$DENO_RELEASE/$DENO_ASSET.sha256sum" ||
+		die "could not download $DENO_RELEASE/$DENO_ASSET.sha256sum"
+	expected_sum="$(awk '{ print $1 }' "$tmp_deno/$DENO_ASSET.sha256sum")"
+	[ -n "$expected_sum" ] || die "the checksum file for $DENO_ASSET is empty"
+	actual_sum="$(sha256sum "$tmp_deno/$DENO_ASSET" | awk '{ print $1 }')"
+	[ "$actual_sum" = "$expected_sum" ] ||
+		die "checksum mismatch on $DENO_ASSET: got $actual_sum, the release says $expected_sum"
+
+	unzip -q -o "$tmp_deno/$DENO_ASSET" deno -d "$tmp_deno" || die "could not unpack $DENO_ASSET"
+	downloaded_version="$("$tmp_deno/deno" --version 2>/dev/null | awk 'NR == 1 { print $2 }' || true)"
+	[ "$downloaded_version" = "$DENO_VERSION" ] ||
+		die "the downloaded deno reports '${downloaded_version:-nothing}', wanted $DENO_VERSION"
+	install -m 0755 "$tmp_deno/deno" "$DENO_PATH"
+	rm -rf "$tmp_deno"
+	trap - EXIT
+	note_changed "deno $DENO_VERSION at $DENO_PATH, checksum verified (was ${installed_deno:-absent})"
 fi
 
 # --- service user -----------------------------------------------------------

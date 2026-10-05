@@ -190,7 +190,7 @@ make pi-setup PI_HOST=channel3.local PI_DISK=/dev/sda1
 
 You can pass the PARTUUID instead: `PI_DISK=PARTUUID=<the one from step 5>`.
 
-The script installs mpv, v4l-utils, ffmpeg and rsync, plus the pinned yt-dlp. It creates the `channel3` service user and mounts the drive at `/srv/channel3`. It creates the `channels`, `library` and `local` folders and installs the systemd unit and the flag file `/etc/default/channel3`. It hides boot text and turns off the login prompt on the TV, and it sets the time zone. **It does not start the service.** The flags are not known until Part 3.
+The script installs mpv, v4l-utils, ffmpeg, rsync and unzip, plus the pinned yt-dlp and Deno, the JavaScript runtime yt-dlp needs for YouTube. It creates the `channel3` service user and mounts the drive at `/srv/channel3`. It creates the `channels`, `library` and `local` folders and installs the systemd unit and the flag file `/etc/default/channel3`. It hides boot text and turns off the login prompt on the TV, and it sets the time zone. **It does not start the service.** The flags are not known until Part 3.
 
 From now on the TV shows no login prompt. ssh is the only way in. If ssh ever breaks, pull the microSD card and fix it from the Mac.
 

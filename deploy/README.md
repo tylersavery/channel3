@@ -44,7 +44,7 @@ make pi-setup PI_HOST=channel3.local PI_DISK=PARTUUID=1a2b3c4d-01 PI_TZ=America/
 
 `PI_DISK` takes either form. `PI_TZ` defaults to `America/Toronto`.
 
-The target copies this directory to the Pi and runs `pi-setup.sh` under sudo. It installs mpv, v4l-utils and ffmpeg, installs the pinned yt-dlp standalone binary, creates the `channel3` system user in the `video`, `render`, `input` and `audio` groups, writes the fstab line and mounts the SSD, creates `/srv/channel3/{channels,library,local}`, installs the unit and the flag file, enables the service at boot, adds the quiet boot parameters to `cmdline.txt`, disables the tty1 login prompt and sets the time zone. It prints what it changed and what was already in place, and re-running it changes nothing.
+The target copies this directory to the Pi and runs `pi-setup.sh` under sudo. It installs mpv, v4l-utils, ffmpeg, rsync and unzip, installs the pinned yt-dlp standalone binary and the pinned Deno that yt-dlp needs for YouTube, creates the `channel3` system user in the `video`, `render`, `input` and `audio` groups, writes the fstab line and mounts the SSD, creates `/srv/channel3/{channels,library,local}`, installs the unit and the flag file, enables the service at boot, adds the quiet boot parameters to `cmdline.txt`, disables the tty1 login prompt and sets the time zone. It prints what it changed and what was already in place, and re-running it changes nothing.
 
 It deliberately does not start the service. The mpv flags are unknown until Phase 4 runs.
 
