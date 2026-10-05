@@ -524,7 +524,7 @@ The restart makes the new channel show up now instead of at 04:00.
 make pi-ingest PI_HOST=channel3.local ARGS="--channel <id>"
 ```
 
-This needs the channel file on the Pi first (the `scp` and `install` lines above). It stops the service, downloads, and starts it again.
+It copies every `.yaml` in `~/srv/channel3/channels/` to the Pi first (the Mac copy is the master, so a deleted file is deleted there too), then stops the service, downloads, and starts it again. This is the everyday route: edit the YAML on the Mac, run this.
 
 **Done when:** the TV is playing a video from your channel.
 

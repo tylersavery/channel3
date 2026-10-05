@@ -82,7 +82,9 @@ make pi-ingest PI_HOST=channel3.local
 make pi-ingest PI_HOST=channel3.local ARGS="--channel saturday-morning --dry-run"
 ```
 
-Ingest refuses to run while the service is broadcasting on the same machine, which on the Pi is always. So `make pi-ingest` does the whole operation: it stops the service, runs the ingest, and starts it again afterwards, including when the ingest fails or you interrupt it.
+Channel configs are edited on the Mac in `~/srv/channel3/channels/`, one YAML file per channel. `make pi-ingest` first mirrors that directory's `.yaml` files onto the Pi, so the Mac copy is the master: a channel file deleted on the Mac is deleted on the Pi too, while its downloaded videos stay on the drive. Set `CHANNEL3_CHANNELS` to sync a different directory. If the directory is missing or holds no `.yaml` files, the script stops before syncing anything.
+
+Ingest refuses to run while the service is broadcasting on the same machine, which on the Pi is always. So `make pi-ingest` does the whole operation: it syncs the channel configs, stops the service, runs the ingest, and starts it again afterwards, including when the ingest fails or you interrupt it.
 
 **The television is dark for the whole ingest.** A large channel takes minutes. Do not run this while the kids are watching. The script says so and waits three seconds before it stops the service, so a command typed in the middle of a programme can still be interrupted with Ctrl-C. Set `CHANNEL3_YES=1` to skip that pause, which is what a script wants.
 

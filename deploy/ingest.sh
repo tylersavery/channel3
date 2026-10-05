@@ -10,6 +10,12 @@
 # the service, ingests, and starts it again even if the ingest failed or you
 # interrupted it. The television is dark for the duration.
 #
+# Before anything stops, the channel configs on this machine are mirrored onto
+# the Pi, so editing the YAML here and running this is the whole workflow. The
+# local directory is the master copy: a channel file deleted here is deleted
+# there, though its downloaded videos stay on the drive. It defaults to
+# ~/srv/channel3/channels and CHANNEL3_CHANNELS overrides it.
+#
 # Ingesting on the Mac into ~/srv/channel3 and rsyncing the library to the Pi is
 # the no-downtime route.
 #
@@ -24,6 +30,7 @@ set -euo pipefail
 
 REMOTE_BIN="/usr/local/bin/channel3"
 REMOTE_ROOT="/srv/channel3"
+LOCAL_CHANNELS="${CHANNEL3_CHANNELS:-$HOME/srv/channel3/channels}"
 
 # How long the warning sits on screen before the broadcast is stopped, so a
 # command typed while the kids are watching can still be interrupted. Set
@@ -77,6 +84,19 @@ if [ "$active_status" -eq 255 ]; then
 	printf 'ingest: could not reach %s over ssh\n' "$PI_HOST" >&2
 	exit 1
 fi
+
+# An empty or missing directory would mirror as "delete every channel", which is
+# never what a typo in CHANNEL3_CHANNELS means.
+if ! compgen -G "$LOCAL_CHANNELS/*.yaml" >/dev/null; then
+	printf 'ingest: no channel files in %s, so nothing was synced and nothing was stopped.\n' "$LOCAL_CHANNELS" >&2
+	printf 'Set CHANNEL3_CHANNELS to the directory that holds your channel YAML.\n' >&2
+	exit 1
+fi
+printf '==> syncing channel configs from %s\n' "$LOCAL_CHANNELS"
+rsync -rt --delete --itemize-changes --include='*.yaml' --exclude='*' \
+	--rsync-path="sudo -u channel3 rsync" \
+	"$LOCAL_CHANNELS/" "$PI_HOST:$REMOTE_ROOT/channels/"
+printf '\n'
 
 if [ "$active_status" -eq 0 ]; then
 	cat <<EOF
