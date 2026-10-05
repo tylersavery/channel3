@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
 	"io"
 	"log/slog"
 	"strconv"
@@ -14,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tylersavery/channel3/internal/bumper"
 	"github.com/tylersavery/channel3/internal/input"
 	"github.com/tylersavery/channel3/internal/player"
 	"github.com/tylersavery/channel3/internal/schedule"
@@ -28,14 +31,25 @@ type loadCall struct {
 
 // fakePlayer stands in for mpv. No test in this package starts a real one.
 type fakePlayer struct {
-	mu       sync.Mutex
-	loads    []loadCall
-	standbys int
-	position loadCall
-	posErr   error
-	loadErr  error
-	texts    []textCall
-	events   chan player.Event
+	mu        sync.Mutex
+	loads     []loadCall
+	standbys  int
+	position  loadCall
+	posErr    error
+	loadErr   error
+	texts     []textCall
+	overlays  []overlayCall
+	removed   []int
+	screen    image.Point
+	screenErr error
+	events    chan player.Event
+}
+
+// overlayCall is one ShowOverlay the station made.
+type overlayCall struct {
+	ID   int
+	Size image.Point
+	X, Y int
 }
 
 // textCall is one ShowText the station made.
@@ -75,6 +89,46 @@ func (p *fakePlayer) ShowText(text string, d time.Duration) error {
 	defer p.mu.Unlock()
 	p.texts = append(p.texts, textCall{Text: text, Duration: d})
 	return nil
+}
+
+func (p *fakePlayer) ShowOverlay(id int, img *image.RGBA, x, y int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.overlays = append(p.overlays, overlayCall{ID: id, Size: img.Bounds().Size(), X: x, Y: y})
+	return nil
+}
+
+func (p *fakePlayer) RemoveOverlay(id int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.removed = append(p.removed, id)
+	return nil
+}
+
+func (p *fakePlayer) ScreenSize() (int, int, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.screenErr != nil {
+		return 0, 0, p.screenErr
+	}
+	if p.screen == (image.Point{}) {
+		return 1920, 1080, nil
+	}
+	return p.screen.X, p.screen.Y, nil
+}
+
+// Overlays returns every ShowOverlay so far.
+func (p *fakePlayer) Overlays() []overlayCall {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]overlayCall(nil), p.overlays...)
+}
+
+// Removed returns every RemoveOverlay so far.
+func (p *fakePlayer) Removed() []int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]int(nil), p.removed...)
 }
 
 // Texts returns every ShowText so far.
@@ -1663,5 +1717,146 @@ func TestChannelNumberDurationComesFromSettings(t *testing.T) {
 
 	if got := lastText(t, p); got.Duration != 3*time.Second {
 		t.Errorf("the number was up for %s, want the configured 3s", got.Duration)
+	}
+}
+
+// cardStation is a key station whose channel 12 has a card and whose other
+// channels do not.
+func cardStation(t *testing.T, p *fakePlayer, clock *fakeClock) *station {
+	t.Helper()
+	s := newTestStation(t, p, clock, "clips", keyChannels())
+	s.loadCards = func() map[string]bumper.Card {
+		return map[string]bumper.Card{
+			"docs": {Name: "Documentaries", Color: color.RGBA{R: 0x36, G: 0x7C, B: 0x2B, A: 0xff}},
+		}
+	}
+	s.refreshCards()
+	s.play()
+	return s
+}
+
+// TestTuneShowsTheChannelsCard is the bumper going up on a channel change, in
+// the lower left of the screen mpv reports, and coming down when its time is up.
+func TestTuneShowsTheChannelsCard(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := cardStation(t, p, clock)
+
+	s.key(input.Key{Action: input.ChannelUp})
+
+	overlays := p.Overlays()
+	if len(overlays) != 1 {
+		t.Fatalf("showed %d overlays tuning to a channel with a card, want 1", len(overlays))
+	}
+	if got := overlays[0]; got.ID != bumperOverlay || got.X <= 0 || got.Y < 1080/2 {
+		t.Errorf("card shown as %+v, want overlay %d in the lower left", got, bumperOverlay)
+	}
+	if want := clock.Now().Add(settings.Default().Bumper.Duration); !s.bumperUntil.Equal(want) {
+		t.Errorf("the card comes down at %s, want %s", s.bumperUntil, want)
+	}
+
+	s.hideBumper()
+	if removed := p.Removed(); len(removed) != 1 || removed[0] != bumperOverlay {
+		t.Errorf("removed overlays %v when the card's time was up, want [%d]", removed, bumperOverlay)
+	}
+	s.hideBumper()
+	if removed := p.Removed(); len(removed) != 1 {
+		t.Errorf("a second hide removed again, %v, want nothing with no card up", removed)
+	}
+}
+
+// TestChannelWithoutACardClearsTheLastOne is tuning away from a card's channel
+// to one with none. The old channel's card must not sit over the new channel.
+func TestChannelWithoutACardClearsTheLastOne(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := cardStation(t, p, clock)
+
+	s.key(input.Key{Action: input.ChannelUp})
+	s.key(input.Key{Action: input.ChannelUp})
+
+	if got := s.Tuned(); got != "kids" {
+		t.Fatalf("tuned %q, want kids", got)
+	}
+	if removed := p.Removed(); len(removed) != 1 {
+		t.Errorf("removed overlays %v tuning to a channel with no card, want the old card taken down", removed)
+	}
+	if len(p.Overlays()) != 1 {
+		t.Errorf("showed %d overlays, want only the first channel's card", len(p.Overlays()))
+	}
+}
+
+func TestBumpersCanBeTurnedOff(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := cardStation(t, p, clock)
+	s.settings.Bumper.Enabled = false
+
+	s.key(input.Key{Action: input.ChannelUp})
+
+	if overlays := p.Overlays(); len(overlays) != 0 {
+		t.Errorf("showed %v with bumpers turned off", overlays)
+	}
+}
+
+// TestUnreadableIconShowsTheNameAlone is a broken SVG in the icons directory.
+// The card still goes up, without its picture.
+func TestUnreadableIconShowsTheNameAlone(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := newTestStation(t, p, clock, "clips", keyChannels())
+	s.loadCards = func() map[string]bumper.Card {
+		return map[string]bumper.Card{"docs": {Name: "Documentaries", Color: color.RGBA{A: 0xff}, Icon: []byte("<svg><path d=\"M 0 0 Q\"")}}
+	}
+	s.refreshCards()
+	s.play()
+
+	s.key(input.Key{Action: input.ChannelUp})
+
+	if overlays := p.Overlays(); len(overlays) != 1 {
+		t.Errorf("showed %d overlays for a card with a broken icon, want the card with its name alone", len(overlays))
+	}
+}
+
+// TestCardRedrawsForANewScreenSize is the Pi moved from a 1080p monitor to the
+// 720p Samsung without a restart: the card must be drawn again at the new size.
+func TestCardRedrawsForANewScreenSize(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := cardStation(t, p, clock)
+
+	s.key(input.Key{Action: input.ChannelUp})
+	p.mu.Lock()
+	p.screen = image.Pt(1366, 768)
+	p.mu.Unlock()
+	s.key(input.Key{Action: input.ChannelDown})
+	s.key(input.Key{Action: input.ChannelUp})
+
+	overlays := p.Overlays()
+	if len(overlays) != 2 {
+		t.Fatalf("showed %d overlays, want 2", len(overlays))
+	}
+	if overlays[0].Size == overlays[1].Size {
+		t.Errorf("the card is %v on both screens, want it redrawn for 1366x768", overlays[1].Size)
+	}
+}
+
+// TestNoScreenSizeShowsNoCard is mpv unable to say how big the screen is. The
+// tune still happens; only the card is skipped.
+func TestNoScreenSizeShowsNoCard(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := cardStation(t, p, clock)
+	p.mu.Lock()
+	p.screenErr = errors.New("no video output")
+	p.mu.Unlock()
+
+	s.key(input.Key{Action: input.ChannelUp})
+
+	if got := s.Tuned(); got != "docs" {
+		t.Errorf("tuned %q, want docs even without a card", got)
+	}
+	if overlays := p.Overlays(); len(overlays) != 0 {
+		t.Errorf("showed %v with no screen size", overlays)
 	}
 }

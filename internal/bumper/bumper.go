@@ -4,7 +4,7 @@
 //
 // Everything is drawn in Go, the SVG icon included, so the Pi needs nothing
 // beyond the one static binary. The result is an ordinary image; putting it on
-// screen is the player's business.
+// screen, and the byte order mpv wants, are the player's business.
 package bumper
 
 import (
@@ -165,17 +165,4 @@ func linear(c uint8) float64 {
 		return v / 12.92
 	}
 	return math.Pow((v+0.055)/1.055, 2.4)
-}
-
-// BGRA returns img's pixels in the byte order mpv's overlay-add calls bgra:
-// blue, green, red, alpha, premultiplied, which image.RGBA already is.
-func BGRA(img *image.RGBA) []byte {
-	out := make([]byte, len(img.Pix))
-	for i := 0; i+3 < len(img.Pix); i += 4 {
-		out[i+0] = img.Pix[i+2]
-		out[i+1] = img.Pix[i+1]
-		out[i+2] = img.Pix[i+0]
-		out[i+3] = img.Pix[i+3]
-	}
-	return out
 }

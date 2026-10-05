@@ -1,6 +1,8 @@
 package player
 
 import (
+	"image"
+	"image/color"
 	"os"
 	"path/filepath"
 	"strings"
@@ -463,5 +465,96 @@ func TestDefaultTimings(t *testing.T) {
 		if c.got != c.want {
 			t.Errorf("%s is %s, want %s", c.name, c.got, c.want)
 		}
+	}
+}
+
+// TestShowOverlayHandsMPVTheRightBytes checks the overlay end to end on the
+// player side: the file holds the pixels in bgra order, and overlay-add names
+// it with the geometry mpv needs to map it.
+func TestShowOverlayHandsMPVTheRightBytes(t *testing.T) {
+	launcher := &fakeLauncher{t: t}
+	sup := startSupervisor(t, launcher, testTimings())
+
+	img := image.NewRGBA(image.Rect(0, 0, 2, 1))
+	img.SetRGBA(0, 0, color.RGBA{R: 1, G: 2, B: 3, A: 255})
+	img.SetRGBA(1, 0, color.RGBA{R: 4, G: 5, B: 6, A: 255})
+	if err := sup.ShowOverlay(7, img, 10, 20); err != nil {
+		t.Fatalf("show overlay: %v", err)
+	}
+
+	got := waitForCommand(t, launcher.Current(), "overlay-add")
+	if len(got) != 10 {
+		t.Fatalf("overlay-add sent %s, want id, x, y, file, offset, format, w, h, stride", commandStrings(got))
+	}
+	want := []any{float64(7), float64(10), float64(20)}
+	for i, w := range want {
+		if got[i+1] != w {
+			t.Errorf("overlay-add argument %d is %v, want %v", i+1, got[i+1], w)
+		}
+	}
+	if got[5] != float64(0) || got[6] != "bgra" || got[7] != float64(2) || got[8] != float64(1) || got[9] != float64(8) {
+		t.Errorf("overlay-add geometry is %s, want offset 0, bgra, 2x1, stride 8", commandStrings(got[5:]))
+	}
+	path, _ := got[4].(string)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the overlay file mpv was given: %v", err)
+	}
+	if wantBytes := []byte{3, 2, 1, 255, 6, 5, 4, 255}; string(data) != string(wantBytes) {
+		t.Errorf("overlay file holds %v, want %v", data, wantBytes)
+	}
+}
+
+// TestShowOverlayPacksASubImage is an image whose stride is wider than its
+// width. mpv is told the stride is width times four, so the file must be packed.
+func TestShowOverlayPacksASubImage(t *testing.T) {
+	launcher := &fakeLauncher{t: t}
+	sup := startSupervisor(t, launcher, testTimings())
+
+	wide := image.NewRGBA(image.Rect(0, 0, 4, 2))
+	sub := wide.SubImage(image.Rect(1, 0, 3, 2)).(*image.RGBA)
+	if err := sup.ShowOverlay(1, sub, 0, 0); err != nil {
+		t.Fatalf("show overlay: %v", err)
+	}
+	got := waitForCommand(t, launcher.Current(), "overlay-add")
+	path, _ := got[4].(string)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the overlay file: %v", err)
+	}
+	if len(data) != 2*2*4 {
+		t.Errorf("overlay file is %d bytes, want %d for a packed 2x2 image", len(data), 2*2*4)
+	}
+}
+
+func TestRemoveOverlaySendsTheID(t *testing.T) {
+	launcher := &fakeLauncher{t: t}
+	sup := startSupervisor(t, launcher, testTimings())
+
+	if err := sup.RemoveOverlay(7); err != nil {
+		t.Fatalf("remove overlay: %v", err)
+	}
+	got := waitForCommand(t, launcher.Current(), "overlay-remove")
+	if len(got) != 2 || got[1] != float64(7) {
+		t.Errorf("overlay-remove sent %s, want id 7", commandStrings(got))
+	}
+}
+
+func TestScreenSizeReadsOSDDimensions(t *testing.T) {
+	launcher := &fakeLauncher{t: t}
+	sup := startSupervisor(t, launcher, testTimings())
+	fake := launcher.Current()
+
+	fake.SetProperty("osd-dimensions", map[string]any{"w": 1366, "h": 768})
+	w, h, err := sup.ScreenSize()
+	if err != nil || w != 1366 || h != 768 {
+		t.Errorf("ScreenSize = %d, %d, %v, want 1366, 768", w, h, err)
+	}
+
+	// mpv with no video output reports zeros, and nothing should be drawn for
+	// a screen that is not there.
+	fake.SetProperty("osd-dimensions", map[string]any{"w": 0, "h": 0})
+	if _, _, err := sup.ScreenSize(); err == nil {
+		t.Error("a 0x0 screen was not an error")
 	}
 }

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/tylersavery/channel3/internal/api"
+	"github.com/tylersavery/channel3/internal/bumper"
 	"github.com/tylersavery/channel3/internal/input"
 	"github.com/tylersavery/channel3/internal/library"
 	"github.com/tylersavery/channel3/internal/player"
@@ -235,6 +236,7 @@ func serve(ctx context.Context, root string, opts serveOptions) error {
 		Keys:         keys,
 		CEC:          tv,
 		Settings:     &look,
+		Cards:        func() map[string]bumper.Card { return loadCards(root) },
 	})
 	if err != nil {
 		return err

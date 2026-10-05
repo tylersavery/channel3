@@ -2,8 +2,12 @@ package main
 
 import (
 	"cmp"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"slices"
 
+	"github.com/tylersavery/channel3/internal/bumper"
 	"github.com/tylersavery/channel3/internal/library"
 	"github.com/tylersavery/channel3/internal/schedule"
 )
@@ -52,4 +56,38 @@ func loadStation(root string) ([]schedule.Channel, error) {
 		return cmp.Compare(a.Number, b.Number)
 	})
 	return station, nil
+}
+
+// loadCards reads every channel's bumper card under root: its name and colour
+// from the channel config, its icon from <root>/icons.
+//
+// Nothing here stops the broadcast. Config that does not load leaves every
+// channel without a card, and an icon that cannot be read leaves that channel's
+// card with its name alone; both are logged. The config itself is reported by
+// loadStation, which reads the same files.
+func loadCards(root string) map[string]bumper.Card {
+	channels, err := library.LoadChannels(library.ChannelsDir(root))
+	if err != nil {
+		slog.Warn("no bumper cards, the channel config did not load", "error", err)
+		return nil
+	}
+	cards := make(map[string]bumper.Card)
+	for _, ch := range channels {
+		if ch.Bumper == nil {
+			continue
+		}
+		card := bumper.Card{Name: ch.Name, Color: ch.Bumper.Color}
+		if ch.Bumper.Icon != "" {
+			path := filepath.Join(library.IconsDir(root), ch.Bumper.Icon)
+			icon, err := os.ReadFile(path)
+			if err != nil {
+				slog.Warn("the channel's icon cannot be read, its card shows the name alone",
+					"channel", ch.ID, "icon", path, "error", err)
+			} else {
+				card.Icon = icon
+			}
+		}
+		cards[ch.ID] = card
+	}
+	return cards
 }

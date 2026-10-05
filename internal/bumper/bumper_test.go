@@ -107,14 +107,6 @@ func TestInkReadsOnTheBackground(t *testing.T) {
 	}
 }
 
-func TestBGRASwapsRedAndBlue(t *testing.T) {
-	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
-	img.SetRGBA(0, 0, color.RGBA{R: 1, G: 2, B: 3, A: 4})
-	if got := BGRA(img); string(got) != string([]byte{3, 2, 1, 4}) {
-		t.Errorf("BGRA = %v, want [3 2 1 4]", got)
-	}
-}
-
 func TestZeroScreenIsAnError(t *testing.T) {
 	if _, err := Render(Card{Color: green}, 0, 1080); err == nil {
 		t.Error("a zero width screen rendered without error")

@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -71,6 +74,14 @@ type Player interface {
 	// ShowText draws text over the picture for d, replacing any text already
 	// up. It survives a Load, so it can be sent at the moment of tuning.
 	ShowText(text string, d time.Duration) error
+	// ShowOverlay puts img over the picture with its top left corner at x, y in
+	// screen pixels, replacing whatever overlay already has id. It survives a
+	// Load, like ShowText.
+	ShowOverlay(id int, img *image.RGBA, x, y int) error
+	// RemoveOverlay takes the overlay with id off the screen.
+	RemoveOverlay(id int) error
+	// ScreenSize reports the size of the output mpv draws on, in pixels.
+	ScreenSize() (width, height int, err error)
 	// Position reports the file mpv is playing and how far into it. An idle
 	// mpv reports an empty path and a zero offset without an error.
 	Position() (string, time.Duration, error)
@@ -145,6 +156,9 @@ type Options struct {
 	Socket string
 	// StandbyPath is the Please Stand By card on disk. Required.
 	StandbyPath string
+	// OverlayDir is where overlay images are written for mpv to read. Empty
+	// takes the socket's directory, which is the service's runtime directory.
+	OverlayDir string
 	// Logger receives the supervisor's own logging. Defaults to a discarding
 	// logger so a library user is never surprised by output.
 	Logger *slog.Logger
@@ -169,6 +183,7 @@ type Supervisor struct {
 	launcher Launcher
 	socket   string
 	standby  string
+	overlays string
 	log      *slog.Logger
 	timings  Timings
 
@@ -211,11 +226,17 @@ func Start(ctx context.Context, opts Options) (*Supervisor, error) {
 		log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 
+	overlayDir := opts.OverlayDir
+	if overlayDir == "" {
+		overlayDir = filepath.Dir(opts.Socket)
+	}
+
 	runCtx, cancel := context.WithCancel(ctx)
 	s := &Supervisor{
 		launcher: opts.Launcher,
 		socket:   opts.Socket,
 		standby:  opts.StandbyPath,
+		overlays: overlayDir,
 		log:      log,
 		timings:  opts.Timings.withDefaults(),
 		events:   make(chan Event, eventBufferOut),
@@ -273,6 +294,90 @@ func (s *Supervisor) ShowText(text string, d time.Duration) error {
 	defer cancel()
 	_, err = conn.Command(ctx, "show-text", text, d.Milliseconds(), 0)
 	return err
+}
+
+// ShowOverlay puts img over the picture at x, y.
+//
+// mpv maps the pixels straight from a file, so they are written to the overlay
+// directory first. The file is written under a temporary name and renamed into
+// place: mpv keeps the mapping of a file it has already shown until the overlay
+// is replaced, and rewriting that file in place would tear the picture.
+func (s *Supervisor) ShowOverlay(id int, img *image.RGBA, x, y int) error {
+	b := img.Bounds()
+	if b.Dx() <= 0 || b.Dy() <= 0 {
+		return fmt.Errorf("player: overlay %d is empty", id)
+	}
+	path := filepath.Join(s.overlays, fmt.Sprintf("overlay-%d.bgra", id))
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, bgra(img), 0o644); err != nil {
+		return fmt.Errorf("player: write overlay %d: %w", id, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("player: place overlay %d: %w", id, err)
+	}
+
+	conn, err := s.currentConn()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), s.timings.Command)
+	defer cancel()
+	_, err = conn.Command(ctx, "overlay-add", id, x, y, path, 0, "bgra", b.Dx(), b.Dy(), b.Dx()*4)
+	return err
+}
+
+// RemoveOverlay takes overlay id off the screen.
+func (s *Supervisor) RemoveOverlay(id int) error {
+	conn, err := s.currentConn()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), s.timings.Command)
+	defer cancel()
+	_, err = conn.Command(ctx, "overlay-remove", id)
+	return err
+}
+
+// ScreenSize reads mpv's osd-dimensions, which on the Pi is the HDMI mode the
+// television accepted. A size of zero, which an mpv with no video output
+// reports, is an error so nothing is drawn for a screen that does not exist.
+func (s *Supervisor) ScreenSize() (int, int, error) {
+	conn, err := s.currentConn()
+	if err != nil {
+		return 0, 0, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), s.timings.Command)
+	defer cancel()
+	data, err := conn.Command(ctx, "get_property", "osd-dimensions")
+	if err != nil {
+		return 0, 0, err
+	}
+	var dims struct {
+		W int `json:"w"`
+		H int `json:"h"`
+	}
+	if err := json.Unmarshal(data, &dims); err != nil {
+		return 0, 0, fmt.Errorf("player: osd-dimensions: %w", err)
+	}
+	if dims.W <= 0 || dims.H <= 0 {
+		return 0, 0, fmt.Errorf("player: mpv reports a %dx%d screen", dims.W, dims.H)
+	}
+	return dims.W, dims.H, nil
+}
+
+// bgra returns img's pixels in the order mpv's overlay-add calls bgra: blue,
+// green, red, alpha, premultiplied, which image.RGBA already is. The image is
+// copied row by row so a sub-image with a wider stride still packs tightly.
+func bgra(img *image.RGBA) []byte {
+	b := img.Bounds()
+	out := make([]byte, 0, b.Dx()*b.Dy()*4)
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		row := img.Pix[img.PixOffset(b.Min.X, y):img.PixOffset(b.Max.X, y)]
+		for i := 0; i+3 < len(row); i += 4 {
+			out = append(out, row[i+2], row[i+1], row[i], row[i+3])
+		}
+	}
+	return out
 }
 
 // loadFile sends a loadfile command and records which path the resulting

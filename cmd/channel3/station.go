@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"image"
 	"log/slog"
 	"strconv"
 	"sync"
 	"time"
 
+	"github.com/tylersavery/channel3/internal/bumper"
 	"github.com/tylersavery/channel3/internal/input"
 	"github.com/tylersavery/channel3/internal/player"
 	"github.com/tylersavery/channel3/internal/schedule"
@@ -58,6 +60,15 @@ type station struct {
 	digitTimeout time.Duration
 	// settings says which on-screen pieces are shown and for how long.
 	settings settings.Settings
+	// loadCards reads every channel's bumper card. Nil means no channel has one.
+	loadCards func() map[string]bumper.Card
+	// cards is the latest loadCards, keyed by channel id, and rendered caches
+	// each card drawn for renderedFor, the screen size it was drawn at.
+	cards       map[string]bumper.Card
+	rendered    map[string]bumper.Placed
+	renderedFor image.Point
+	// bumperUntil is when the card on screen comes down; zero when none is up.
+	bumperUntil time.Time
 
 	// channels is the whole station, replaced wholesale at every rollover.
 	// The loop is its only writer and reads it directly; the API reads a copy
@@ -97,6 +108,10 @@ type station struct {
 	retried bool
 }
 
+// bumperOverlay is the mpv overlay id the channel's card is drawn under. One
+// card is up at a time, so one id is enough.
+const bumperOverlay = 1
+
 // excludedItem names one item excluded for the day.
 type excludedItem struct {
 	channel string
@@ -127,6 +142,9 @@ type stationOptions struct {
 	DigitTimeout time.Duration
 	// Settings is the on-screen look. Nil takes settings.Default.
 	Settings *settings.Settings
+	// Cards reads every channel's bumper card, at startup and at each
+	// rollover. Nil means no bumpers.
+	Cards func() map[string]bumper.Card
 }
 
 // newStation builds a station and tunes it, without starting the loop.
@@ -166,6 +184,8 @@ func newStation(opts stationOptions) (*station, error) {
 	if opts.Settings != nil {
 		s.settings = *opts.Settings
 	}
+	s.loadCards = opts.Cards
+	s.refreshCards()
 
 	channels, err := s.reload()
 	if err != nil {
@@ -325,6 +345,11 @@ func (s *station) run(ctx context.Context) error {
 	digits.Stop()
 	defer digits.Stop()
 
+	// card fires when the channel's bumper has been up long enough.
+	card := time.NewTimer(time.Hour)
+	card.Stop()
+	defer card.Stop()
+
 	// Television keys are sent on their own goroutine. cec-ctl can sit for its
 	// full timeout against a set that is off, and an end-file event arriving
 	// meanwhile must not wait behind it: the screen would hold a finished item
@@ -364,10 +389,13 @@ func (s *station) run(ctx context.Context) error {
 			s.key(key)
 		case <-digits.C:
 			s.expireDigits()
+		case <-card.C:
+			s.hideBumper()
 		case <-ticker.C:
 			s.reconcile()
 		}
 		s.armDigits(digits)
+		s.armBumper(card)
 	}
 }
 
@@ -484,6 +512,94 @@ func (s *station) tuneTo(target input.Channel) {
 	s.log.Info("tune", "number", target.Number, "channel", target.ID)
 	s.play()
 	s.showNumber(strconv.Itoa(target.Number))
+	s.showBumper(target.ID)
+}
+
+// refreshCards rereads the bumper cards and forgets every card drawn from the
+// old ones.
+func (s *station) refreshCards() {
+	s.cards = nil
+	if s.loadCards != nil {
+		s.cards = s.loadCards()
+	}
+	s.rendered = make(map[string]bumper.Placed)
+}
+
+// showBumper puts the channel's card up, or takes down whatever card is up
+// when the channel has none, so the last channel's card never lingers over
+// this one.
+func (s *station) showBumper(id string) {
+	card, ok := s.cards[id]
+	if !s.settings.Bumper.Enabled || !ok {
+		s.hideBumper()
+		return
+	}
+	placed, ok := s.renderCard(id, card)
+	if !ok {
+		s.hideBumper()
+		return
+	}
+	if err := s.player.ShowOverlay(bumperOverlay, placed.Image, placed.X, placed.Y); err != nil {
+		s.log.Warn("could not show the channel's card", "channel", id, "error", err)
+		return
+	}
+	s.bumperUntil = s.now().Add(s.settings.Bumper.Duration)
+}
+
+// renderCard returns the channel's card drawn for the current screen, drawing
+// it the first time and again whenever the screen size changes. A card whose
+// icon will not draw is drawn with the name alone, and the log says why.
+func (s *station) renderCard(id string, card bumper.Card) (bumper.Placed, bool) {
+	w, h, err := s.player.ScreenSize()
+	if err != nil {
+		s.log.Warn("no screen size for the channel's card", "channel", id, "error", err)
+		return bumper.Placed{}, false
+	}
+	if screen := image.Pt(w, h); screen != s.renderedFor {
+		s.rendered = make(map[string]bumper.Placed)
+		s.renderedFor = screen
+	}
+	if placed, ok := s.rendered[id]; ok {
+		return placed, true
+	}
+
+	placed, err := bumper.Render(card, w, h)
+	if err != nil && card.Icon != nil {
+		s.log.Warn("the channel's icon will not draw, showing its name alone", "channel", id, "error", err)
+		card.Icon = nil
+		placed, err = bumper.Render(card, w, h)
+	}
+	if err != nil {
+		s.log.Warn("could not draw the channel's card", "channel", id, "error", err)
+		return bumper.Placed{}, false
+	}
+	s.rendered[id] = placed
+	return placed, true
+}
+
+// hideBumper takes the card down, if one is up.
+func (s *station) hideBumper() {
+	if s.bumperUntil.IsZero() {
+		return
+	}
+	s.bumperUntil = time.Time{}
+	if err := s.player.RemoveOverlay(bumperOverlay); err != nil {
+		s.log.Warn("could not take the channel's card down", "error", err)
+	}
+}
+
+// armBumper sets the timer for the card on screen, and stops it when there is
+// none.
+func (s *station) armBumper(timer *time.Timer) {
+	if s.bumperUntil.IsZero() {
+		timer.Stop()
+		return
+	}
+	wait := s.bumperUntil.Sub(s.now())
+	if wait < 0 {
+		wait = 0
+	}
+	timer.Reset(wait)
 }
 
 // control queues a power or volume button for the television.
@@ -856,6 +972,7 @@ func (s *station) rollover(day time.Time) {
 		return
 	}
 	s.setChannels(channels)
+	s.refreshCards()
 	s.day = day
 
 	if _, ok := s.channel(s.tuned); !ok {
