@@ -101,6 +101,32 @@ func TestStandbyLoadsTheCard(t *testing.T) {
 	}
 }
 
+// TestShowTextSendsLevelZero checks the one message mpv is allowed to draw. mpv
+// runs with osd-level=0, so a show-text at the default level would never
+// appear.
+func TestShowTextSendsLevelZero(t *testing.T) {
+	launcher := &fakeLauncher{t: t}
+	sup := startSupervisor(t, launcher, testTimings())
+
+	if err := sup.ShowText("12", 1500*time.Millisecond); err != nil {
+		t.Fatalf("show text: %v", err)
+	}
+
+	got := waitForCommand(t, launcher.Current(), "show-text")
+	if len(got) != 4 {
+		t.Fatalf("show text sent %s, want text, duration and level", commandStrings(got))
+	}
+	if text, _ := got[1].(string); text != "12" {
+		t.Errorf("show text drew %q, want 12", text)
+	}
+	if ms, _ := got[2].(float64); ms != 1500 {
+		t.Errorf("show text lasts %vms, want 1500", got[2])
+	}
+	if level, _ := got[3].(float64); level != 0 {
+		t.Errorf("show text asked for level %v, want 0 so osd-level=0 lets it through", got[3])
+	}
+}
+
 // TestEndFileReasonsAreFiltered is the rule that keeps the station from
 // looping: mpv reports the file our own load replaced, and that must not look
 // like a file that finished.

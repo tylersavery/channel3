@@ -29,6 +29,10 @@ const reconcileInterval = 30 * time.Second
 // that a real jump is corrected.
 const reconcileTolerance = 5 * time.Second
 
+// numberDuration is how long the channel number stays up after a change, which
+// is about what a television's own number does.
+const numberDuration = 1500 * time.Millisecond
+
 // station is the broadcast loop.
 //
 // Everything it knows is held in memory and thrown away on exit: the channels
@@ -377,7 +381,31 @@ func (s *station) key(k input.Key) {
 		return
 	}
 	if k.Action == input.Digit {
+		s.showTyping()
 		s.reportNumber(pending+strconv.Itoa(k.Digit), target)
+	}
+}
+
+// showTyping puts a half typed channel number up with a dash for the digit
+// still to come, the way a television does, until the tuner gives up waiting.
+// Without it a two digit number shows nothing for a second and a half after
+// the first press, which reads as a remote that did not work.
+func (s *station) showTyping() {
+	waiting, deadline := s.tuner.Pending()
+	if waiting == "" {
+		return
+	}
+	s.showText(waiting+"-", deadline.Sub(s.now()))
+}
+
+// showText puts text over the picture. A failure costs the viewer a number on
+// screen and nothing else, so it is logged and the broadcast goes on.
+func (s *station) showText(text string, d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	if err := s.player.ShowText(text, d); err != nil {
+		s.log.Warn("could not show text on screen", "text", text, "error", err)
 	}
 }
 
@@ -406,9 +434,11 @@ func (s *station) reportNumber(number string, target input.Channel) {
 	}
 	if target.ID != "" {
 		s.log.Info("already on that channel", "number", target.Number, "channel", target.ID)
+		s.showText(strconv.Itoa(target.Number), numberDuration)
 		return
 	}
 	s.log.Info("no channel has that number, staying put", "keyed", number, "channel", s.tuned)
+	s.showText(number, numberDuration)
 }
 
 // armDigits sets the timer from whatever the tuner is waiting for.
@@ -440,6 +470,7 @@ func (s *station) tuneTo(target input.Channel) {
 	}
 	s.log.Info("tune", "number", target.Number, "channel", target.ID)
 	s.play()
+	s.showText(strconv.Itoa(target.Number), numberDuration)
 }
 
 // control queues a power or volume button for the television.

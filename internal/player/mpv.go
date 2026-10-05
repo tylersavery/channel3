@@ -41,8 +41,11 @@ type Launcher interface {
 
 // BaseArgs are the mpv flags Channel Three always sets.
 //
-// The television shows video and nothing else: no on-screen controller, no OSD,
-// no keyboard bindings of mpv's own, and no terminal output. idle=yes keeps mpv
+// The television shows video and nothing else: no on-screen controller, no OSD
+// of mpv's own, no keyboard bindings of mpv's own, and no terminal output. The
+// one exception is ShowText, which the station uses for the channel number;
+// the osd-* styling below is that number's look, a retro green in the top
+// right corner. idle=yes keeps mpv
 // alive between files so the supervisor holds one process for the life of the
 // service, and keep-open=no makes a finished file end rather than freeze on its
 // last frame. image-display-duration=inf is what holds the Stand By card up
@@ -53,6 +56,16 @@ func BaseArgs(socket string) []string {
 		"--no-osc",
 		"--no-osd-bar",
 		"--osd-level=0",
+		"--osd-font=DejaVu Sans Mono",
+		"--osd-bold=yes",
+		"--osd-font-size=120",
+		"--osd-color=#33FF33",
+		"--osd-border-color=#000000",
+		"--osd-border-size=4",
+		"--osd-align-x=right",
+		"--osd-align-y=top",
+		"--osd-margin-x=60",
+		"--osd-margin-y=45",
 		"--no-input-default-bindings",
 		"--input-vo-keyboard=no",
 		"--no-terminal",

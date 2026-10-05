@@ -33,7 +33,14 @@ type fakePlayer struct {
 	position loadCall
 	posErr   error
 	loadErr  error
+	texts    []textCall
 	events   chan player.Event
+}
+
+// textCall is one ShowText the station made.
+type textCall struct {
+	Text     string
+	Duration time.Duration
 }
 
 // newFakePlayer returns a player that records what it is asked to do.
@@ -60,6 +67,20 @@ func (p *fakePlayer) Standby() error {
 	p.standbys++
 	p.position = loadCall{}
 	return nil
+}
+
+func (p *fakePlayer) ShowText(text string, d time.Duration) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.texts = append(p.texts, textCall{Text: text, Duration: d})
+	return nil
+}
+
+// Texts returns every ShowText so far.
+func (p *fakePlayer) Texts() []textCall {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]textCall(nil), p.texts...)
 }
 
 func (p *fakePlayer) Position() (string, time.Duration, error) {
@@ -1524,5 +1545,88 @@ func TestPlayableChannelsIsSafeWhileItemsAreExcluded(t *testing.T) {
 
 	if got := len(s.PlayableChannels()); got != len(channels) {
 		t.Errorf("the station reports %d channels, want %d", got, len(channels))
+	}
+}
+
+// lastText returns the most recent ShowText, failing the test if there was none.
+func lastText(t *testing.T, p *fakePlayer) textCall {
+	t.Helper()
+	texts := p.Texts()
+	if len(texts) == 0 {
+		t.Fatal("nothing was shown on screen")
+	}
+	return texts[len(texts)-1]
+}
+
+// TestChannelChangeShowsTheNumber is the television's own channel number, up
+// for a moment after every change.
+func TestChannelChangeShowsTheNumber(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := newTestStation(t, p, clock, "clips", keyChannels())
+	s.play()
+
+	s.key(input.Key{Action: input.ChannelUp})
+
+	if got := lastText(t, p); got.Text != "12" || got.Duration != numberDuration {
+		t.Errorf("showed %q for %s, want 12 for %s", got.Text, got.Duration, numberDuration)
+	}
+}
+
+// TestTypedDigitsShowWhileWaiting is the first digit of a two digit number. The
+// tuner waits to see whether a second digit follows, and the screen says so
+// rather than doing nothing.
+func TestTypedDigitsShowWhileWaiting(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := newTestStation(t, p, clock, "clips", keyChannels())
+	s.play()
+
+	s.key(input.Key{Action: input.Digit, Digit: 1})
+	waiting := lastText(t, p)
+	if waiting.Text != "1-" {
+		t.Errorf("showed %q after keying 1, want 1-", waiting.Text)
+	}
+	if waiting.Duration <= 0 {
+		t.Errorf("the half typed number is up for %s, want until the tuner stops waiting", waiting.Duration)
+	}
+
+	s.key(input.Key{Action: input.Digit, Digit: 2})
+	if got := lastText(t, p); got.Text != "12" {
+		t.Errorf("showed %q after keying 12, want 12", got.Text)
+	}
+}
+
+// TestUnknownNumberIsShownThenDropped is a number nobody broadcasts on. It
+// shows, so the press was seen, and the channel stays where it was.
+func TestUnknownNumberIsShownThenDropped(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := newTestStation(t, p, clock, "clips", keyChannels())
+	s.play()
+	loads := len(p.Loads())
+
+	s.key(input.Key{Action: input.Digit, Digit: 9})
+
+	if got := lastText(t, p); got.Text != "9" || got.Duration != numberDuration {
+		t.Errorf("showed %q for %s, want 9 for %s", got.Text, got.Duration, numberDuration)
+	}
+	if got := len(p.Loads()); got != loads {
+		t.Errorf("keying an unknown number loaded %d times, want none", got-loads)
+	}
+}
+
+// TestKeyingTheTunedChannelShowsItsNumber is keying the channel already on,
+// which changes nothing but still answers the press.
+func TestKeyingTheTunedChannelShowsItsNumber(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := newTestStation(t, p, clock, "clips", keyChannels())
+	s.play()
+
+	s.key(input.Key{Action: input.Digit, Digit: 5})
+
+	if got := lastText(t, p); got.Text != "5" {
+		t.Errorf("showed %q after keying the tuned channel, want 5", got.Text)
 	}
 }

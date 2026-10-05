@@ -68,6 +68,9 @@ type Player interface {
 	Load(path string, offset time.Duration) error
 	// Standby shows the Please Stand By card until the next Load.
 	Standby() error
+	// ShowText draws text over the picture for d, replacing any text already
+	// up. It survives a Load, so it can be sent at the moment of tuning.
+	ShowText(text string, d time.Duration) error
 	// Position reports the file mpv is playing and how far into it. An idle
 	// mpv reports an empty path and a zero offset without an error.
 	Position() (string, time.Duration, error)
@@ -254,6 +257,22 @@ func (s *Supervisor) Load(path string, offset time.Duration) error {
 // black screen.
 func (s *Supervisor) Standby() error {
 	return s.loadFile(s.standby, "loadfile", s.standby, "replace")
+}
+
+// ShowText draws text over the picture for d.
+//
+// mpv runs with osd-level=0 so that none of its own messages ever appear. The
+// last argument to show-text is the level a message needs, and 0 is what lets
+// this one through.
+func (s *Supervisor) ShowText(text string, d time.Duration) error {
+	conn, err := s.currentConn()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), s.timings.Command)
+	defer cancel()
+	_, err = conn.Command(ctx, "show-text", text, d.Milliseconds(), 0)
+	return err
 }
 
 // loadFile sends a loadfile command and records which path the resulting
