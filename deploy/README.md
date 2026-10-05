@@ -82,7 +82,7 @@ make pi-ingest PI_HOST=channel3.local
 make pi-ingest PI_HOST=channel3.local ARGS="--channel saturday-morning --dry-run"
 ```
 
-Channel configs are edited on the Mac in `~/srv/channel3/channels/`, one YAML file per channel. `make pi-ingest` first mirrors that directory's `.yaml` files onto the Pi, so the Mac copy is the master: a channel file deleted on the Mac is deleted on the Pi too, while its downloaded videos stay on the drive. Set `CHANNEL3_CHANNELS` to sync a different directory. If the directory is missing or holds no `.yaml` files, the script stops before syncing anything.
+Channel configs are edited on the Mac in `~/srv/channel3/channels/`, one YAML file per channel. `make pi-ingest` first mirrors that directory's `.yaml` files onto the Pi, so the Mac copy is the master: a channel file deleted on the Mac is deleted on the Pi too, while its downloaded videos stay on the drive. Set `CHANNEL3_CHANNELS` to sync a different directory. `settings.yaml` beside that directory (`~/srv/channel3/settings.yaml`) is mirrored to `/srv/channel3/settings.yaml` the same way. It holds the on-screen settings, such as the channel number and the bumpers, and `settings.example.yaml` in the repo documents every field. The service reads it at startup, so a change needs a restart, which `make pi-ingest` does anyway. If the directory is missing or holds no `.yaml` files, the script stops before syncing anything.
 
 Ingest refuses to run while the service is broadcasting on the same machine, which on the Pi is always. So `make pi-ingest` does the whole operation: it syncs the channel configs, stops the service, runs the ingest, and starts it again afterwards, including when the ingest fails or you interrupt it.
 

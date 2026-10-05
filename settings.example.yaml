@@ -1,0 +1,15 @@
+# Channel Three on-screen settings. This is the only settings file the repository carries.
+#
+# Copy it to settings.yaml beside the channels directory: ~/srv/channel3/settings.yaml on the Mac. make pi-ingest copies it to /srv/channel3/settings.yaml on the Pi, and serve reads it when it starts. Nothing is changed from the television.
+#
+# Every field is optional; a missing field keeps the default shown here. A field that does not exist, or a duration outside 100ms to 10s, is logged and the whole file falls back to the defaults, so a typo never stops the broadcast.
+
+# The green number in the top right after a channel change.
+channel_number:
+  enabled: true
+  duration: 1.5s
+
+# The channel's card in the lower left after a channel change. Each channel sets its own icon and colour with a bumper block in its YAML.
+bumpers:
+  enabled: true
+  duration: 2s

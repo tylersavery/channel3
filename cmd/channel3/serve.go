@@ -21,6 +21,7 @@ import (
 	"github.com/tylersavery/channel3/internal/library"
 	"github.com/tylersavery/channel3/internal/player"
 	"github.com/tylersavery/channel3/internal/schedule"
+	"github.com/tylersavery/channel3/internal/settings"
 	"github.com/tylersavery/channel3/web"
 )
 
@@ -214,6 +215,16 @@ func serve(ctx context.Context, root string, opts serveOptions) error {
 		slog.Info("television control is on", "cec device", opts.CECDevice)
 	}
 
+	// A settings file with a mistake in it costs the look, never the
+	// broadcast: the defaults are used and the journal says what was wrong.
+	look, err := settings.Load(root)
+	if err != nil {
+		slog.Error("settings are not usable, using the defaults", "file", settings.Path(root), "error", err)
+	}
+	slog.Info("on-screen settings",
+		"channel number", look.ChannelNumber.Enabled, "number for", look.ChannelNumber.Duration,
+		"bumpers", look.Bumper.Enabled, "bumper for", look.Bumper.Duration)
+
 	station, err := newStation(stationOptions{
 		Player:       mpv,
 		Clock:        clock,
@@ -223,6 +234,7 @@ func serve(ctx context.Context, root string, opts serveOptions) error {
 		Logger:       slog.Default(),
 		Keys:         keys,
 		CEC:          tv,
+		Settings:     &look,
 	})
 	if err != nil {
 		return err

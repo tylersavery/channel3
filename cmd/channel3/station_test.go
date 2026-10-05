@@ -17,6 +17,7 @@ import (
 	"github.com/tylersavery/channel3/internal/input"
 	"github.com/tylersavery/channel3/internal/player"
 	"github.com/tylersavery/channel3/internal/schedule"
+	"github.com/tylersavery/channel3/internal/settings"
 )
 
 // loadCall is one Load the station asked the player for.
@@ -1568,8 +1569,8 @@ func TestChannelChangeShowsTheNumber(t *testing.T) {
 
 	s.key(input.Key{Action: input.ChannelUp})
 
-	if got := lastText(t, p); got.Text != "12" || got.Duration != numberDuration {
-		t.Errorf("showed %q for %s, want 12 for %s", got.Text, got.Duration, numberDuration)
+	if got := lastText(t, p); got.Text != "12" || got.Duration != settings.Default().ChannelNumber.Duration {
+		t.Errorf("showed %q for %s, want 12 for %s", got.Text, got.Duration, settings.Default().ChannelNumber.Duration)
 	}
 }
 
@@ -1608,8 +1609,8 @@ func TestUnknownNumberIsShownThenDropped(t *testing.T) {
 
 	s.key(input.Key{Action: input.Digit, Digit: 9})
 
-	if got := lastText(t, p); got.Text != "9" || got.Duration != numberDuration {
-		t.Errorf("showed %q for %s, want 9 for %s", got.Text, got.Duration, numberDuration)
+	if got := lastText(t, p); got.Text != "9" || got.Duration != settings.Default().ChannelNumber.Duration {
+		t.Errorf("showed %q for %s, want 9 for %s", got.Text, got.Duration, settings.Default().ChannelNumber.Duration)
 	}
 	if got := len(p.Loads()); got != loads {
 		t.Errorf("keying an unknown number loaded %d times, want none", got-loads)
@@ -1628,5 +1629,39 @@ func TestKeyingTheTunedChannelShowsItsNumber(t *testing.T) {
 
 	if got := lastText(t, p); got.Text != "5" {
 		t.Errorf("showed %q after keying the tuned channel, want 5", got.Text)
+	}
+}
+
+// TestChannelNumberCanBeTurnedOff is settings.yaml saying no number: channel
+// changes and typed digits both leave the screen alone.
+func TestChannelNumberCanBeTurnedOff(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := newTestStation(t, p, clock, "clips", keyChannels())
+	s.settings.ChannelNumber.Enabled = false
+	s.play()
+
+	s.key(input.Key{Action: input.ChannelUp})
+	s.key(input.Key{Action: input.Digit, Digit: 1})
+	s.key(input.Key{Action: input.Digit, Digit: 9})
+
+	if texts := p.Texts(); len(texts) != 0 {
+		t.Errorf("showed %v with the channel number turned off", texts)
+	}
+}
+
+// TestChannelNumberDurationComesFromSettings is a longer number set in
+// settings.yaml reaching the player.
+func TestChannelNumberDurationComesFromSettings(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := newTestStation(t, p, clock, "clips", keyChannels())
+	s.settings.ChannelNumber.Duration = 3 * time.Second
+	s.play()
+
+	s.key(input.Key{Action: input.ChannelUp})
+
+	if got := lastText(t, p); got.Duration != 3*time.Second {
+		t.Errorf("the number was up for %s, want the configured 3s", got.Duration)
 	}
 }

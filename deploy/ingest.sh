@@ -14,7 +14,9 @@
 # the Pi, so editing the YAML here and running this is the whole workflow. The
 # local directory is the master copy: a channel file deleted here is deleted
 # there, though its downloaded videos stay on the drive. It defaults to
-# ~/srv/channel3/channels and CHANNEL3_CHANNELS overrides it.
+# ~/srv/channel3/channels and CHANNEL3_CHANNELS overrides it. settings.yaml
+# beside that directory is mirrored the same way: copied when it exists here,
+# removed there when it does not, which puts the Pi back on the defaults.
 #
 # Ingesting on the Mac into ~/srv/channel3 and rsyncing the library to the Pi is
 # the no-downtime route.
@@ -96,6 +98,16 @@ printf '==> syncing channel configs from %s\n' "$LOCAL_CHANNELS"
 rsync -rt --delete --itemize-changes --include='*.yaml' --exclude='*' \
 	--rsync-path="sudo -u channel3 rsync" \
 	"$LOCAL_CHANNELS/" "$PI_HOST:$REMOTE_ROOT/channels/"
+
+local_settings="$(dirname "$LOCAL_CHANNELS")/settings.yaml"
+if [ -f "$local_settings" ]; then
+	printf '==> syncing %s\n' "$local_settings"
+	rsync -t --itemize-changes --rsync-path="sudo -u channel3 rsync" \
+		"$local_settings" "$PI_HOST:$REMOTE_ROOT/settings.yaml"
+else
+	# shellcheck disable=SC2029  # local constant, expanded here on purpose
+	ssh "$PI_HOST" "sudo -u channel3 rm -f $REMOTE_ROOT/settings.yaml"
+fi
 printf '\n'
 
 if [ "$active_status" -eq 0 ]; then

@@ -11,6 +11,7 @@ import (
 	"github.com/tylersavery/channel3/internal/input"
 	"github.com/tylersavery/channel3/internal/player"
 	"github.com/tylersavery/channel3/internal/schedule"
+	"github.com/tylersavery/channel3/internal/settings"
 )
 
 // reconcileInterval is how often the station checks that mpv is playing what
@@ -28,10 +29,6 @@ const reconcileInterval = 30 * time.Second
 // a load takes and the rounding in mpv's reported position, and tight enough
 // that a real jump is corrected.
 const reconcileTolerance = 5 * time.Second
-
-// numberDuration is how long the channel number stays up after a change, which
-// is about what a television's own number does.
-const numberDuration = 1500 * time.Millisecond
 
 // station is the broadcast loop.
 //
@@ -59,6 +56,8 @@ type station struct {
 	// digitTimeout overrides how long the tuner waits for another digit. Zero
 	// takes the tuner's default; tests shorten it.
 	digitTimeout time.Duration
+	// settings says which on-screen pieces are shown and for how long.
+	settings settings.Settings
 
 	// channels is the whole station, replaced wholesale at every rollover.
 	// The loop is its only writer and reads it directly; the API reads a copy
@@ -126,6 +125,8 @@ type stationOptions struct {
 	// DigitTimeout overrides how long a half typed channel number waits for
 	// another digit. Zero takes input.DigitTimeout.
 	DigitTimeout time.Duration
+	// Settings is the on-screen look. Nil takes settings.Default.
+	Settings *settings.Settings
 }
 
 // newStation builds a station and tunes it, without starting the loop.
@@ -160,6 +161,10 @@ func newStation(opts stationOptions) (*station, error) {
 		controls:     make(chan input.Key, 1),
 		digitTimeout: opts.DigitTimeout,
 		excluded:     make(map[string]map[string]bool),
+		settings:     settings.Default(),
+	}
+	if opts.Settings != nil {
+		s.settings = *opts.Settings
 	}
 
 	channels, err := s.reload()
@@ -392,10 +397,18 @@ func (s *station) key(k input.Key) {
 // the first press, which reads as a remote that did not work.
 func (s *station) showTyping() {
 	waiting, deadline := s.tuner.Pending()
-	if waiting == "" {
+	if waiting == "" || !s.settings.ChannelNumber.Enabled {
 		return
 	}
 	s.showText(waiting+"-", deadline.Sub(s.now()))
+}
+
+// showNumber puts a channel number up, if the settings show one.
+func (s *station) showNumber(number string) {
+	if !s.settings.ChannelNumber.Enabled {
+		return
+	}
+	s.showText(number, s.settings.ChannelNumber.Duration)
 }
 
 // showText puts text over the picture. A failure costs the viewer a number on
@@ -434,11 +447,11 @@ func (s *station) reportNumber(number string, target input.Channel) {
 	}
 	if target.ID != "" {
 		s.log.Info("already on that channel", "number", target.Number, "channel", target.ID)
-		s.showText(strconv.Itoa(target.Number), numberDuration)
+		s.showNumber(strconv.Itoa(target.Number))
 		return
 	}
 	s.log.Info("no channel has that number, staying put", "keyed", number, "channel", s.tuned)
-	s.showText(number, numberDuration)
+	s.showNumber(number)
 }
 
 // armDigits sets the timer from whatever the tuner is waiting for.
@@ -470,7 +483,7 @@ func (s *station) tuneTo(target input.Channel) {
 	}
 	s.log.Info("tune", "number", target.Number, "channel", target.ID)
 	s.play()
-	s.showText(strconv.Itoa(target.Number), numberDuration)
+	s.showNumber(strconv.Itoa(target.Number))
 }
 
 // control queues a power or volume button for the television.
