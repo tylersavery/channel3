@@ -96,11 +96,24 @@ func TestShortcutUploadIsAccepted(t *testing.T) {
 	}
 }
 
-func TestUploadWithoutAFilenameIsRejected(t *testing.T) {
-	rec := httptest.NewRecorder()
-	uploadServer(&fakeUploads{}, "6635").ServeHTTP(rec, rawUpload("6635", "", "clip"))
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("status %d with no filename, want 400", rec.Code)
+// TestUploadWithoutAFilenameIsNamedFromItsType is the Shortcut that did not
+// send X-Filename: the clip is still taken, named for its content type.
+func TestUploadWithoutAFilenameIsNamedFromItsType(t *testing.T) {
+	for contentType, want := range map[string]string{
+		"video/quicktime": "Home video.mov",
+		"video/mp4":       "Home video.mp4",
+		"":                "Home video.mov",
+	} {
+		up := &fakeUploads{}
+		r := rawUpload("6635", "", "clip")
+		if contentType != "" {
+			r.Header.Set("Content-Type", contentType)
+		}
+		rec := httptest.NewRecorder()
+		uploadServer(up, "6635").ServeHTTP(rec, r)
+		if rec.Code != http.StatusAccepted || up.name != want {
+			t.Errorf("%q: status %d, stored as %q, want 202 and %q", contentType, rec.Code, up.name, want)
+		}
 	}
 }
 
