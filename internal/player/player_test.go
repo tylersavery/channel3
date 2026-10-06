@@ -602,3 +602,9 @@ func TestScaledTextUsesExpandedASS(t *testing.T) {
 		t.Errorf("styled text %q, want %q", text, want)
 	}
 }
+
+func TestEscapeOSDBreaksLines(t *testing.T) {
+	if got, want := escapeOSD("Help!\nThe Beatles"), `Help!\NThe Beatles`; got != want {
+		t.Errorf("escapeOSD = %q, want %q", got, want)
+	}
+}

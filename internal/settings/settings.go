@@ -34,6 +34,9 @@ type Settings struct {
 	ChannelNumber Overlay
 	// Bumper is the channel's card shown after a channel change.
 	Bumper Overlay
+	// TrackInfo is a song's title and artist, shown as it starts and again
+	// as it ends.
+	TrackInfo Overlay
 	// Volume is how the remote's volume buttons behave.
 	Volume Volume
 }
@@ -67,6 +70,7 @@ func Default() Settings {
 	return Settings{
 		ChannelNumber: Overlay{Enabled: true, Duration: 1500 * time.Millisecond},
 		Bumper:        Overlay{Enabled: true, Duration: 2 * time.Second},
+		TrackInfo:     Overlay{Enabled: true, Duration: 8 * time.Second},
 		Volume:        Volume{Control: VolumeOnPi, Start: 50, Max: 70, Step: 5, Show: true},
 	}
 }
@@ -76,6 +80,7 @@ func Default() Settings {
 type file struct {
 	ChannelNumber *overlayFile `yaml:"channel_number"`
 	Bumpers       *overlayFile `yaml:"bumpers"`
+	TrackInfo     *overlayFile `yaml:"track_info"`
 	Volume        *volumeFile  `yaml:"volume"`
 }
 
@@ -122,6 +127,9 @@ func Load(root string) (Settings, error) {
 		return Default(), err
 	}
 	if err := apply(&s.Bumper, f.Bumpers, "bumpers"); err != nil {
+		return Default(), err
+	}
+	if err := apply(&s.TrackInfo, f.TrackInfo, "track_info"); err != nil {
 		return Default(), err
 	}
 	if err := applyVolume(&s.Volume, f.Volume); err != nil {

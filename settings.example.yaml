@@ -14,6 +14,11 @@ bumpers:
   enabled: true
   duration: 2s
 
+# On a radio station, the song's title and artist, shown as each song starts and again for its last few seconds. The rest of the time the screen is black.
+track_info:
+  enabled: true
+  duration: 8s
+
 # The remote's volume and mute buttons.
 #
 # control: pi sets the Pi's own volume and leaves the television's alone, so set the television's volume once, by hand, to the loudest anyone should ever hear, and max is a percentage of that. control: tv sends the buttons to the television over HDMI-CEC instead (it needs --cec), and the rest of this section does nothing.

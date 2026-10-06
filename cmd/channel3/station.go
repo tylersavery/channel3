@@ -74,6 +74,15 @@ type station struct {
 	// rollover. It holds one request: several arriving together are one
 	// rescan.
 	rescans chan struct{}
+	// numberUntil is when the channel number on screen comes down. mpv shows
+	// one message at a time, so a song's title waits for it.
+	numberUntil time.Time
+	// trackStartAt and trackEndAt are when the song now playing has its title
+	// shown, as it starts and before it ends; zero when nothing is due.
+	// trackText is what is shown.
+	trackStartAt time.Time
+	trackEndAt   time.Time
+	trackText    string
 	// volume and muted are mpv's level and mute, when the remote's volume
 	// buttons are the Pi's. Held in memory only: every start is at
 	// settings.Volume.Start.
@@ -363,6 +372,11 @@ func (s *station) run(ctx context.Context) error {
 	card.Stop()
 	defer card.Stop()
 
+	// track fires when a song's title is due on screen.
+	track := time.NewTimer(time.Hour)
+	track.Stop()
+	defer track.Stop()
+
 	// Television keys are sent on their own goroutine. cec-ctl can sit for its
 	// full timeout against a set that is off, and an end-file event arriving
 	// meanwhile must not wait behind it: the screen would hold a finished item
@@ -404,6 +418,8 @@ func (s *station) run(ctx context.Context) error {
 			s.expireDigits()
 		case <-card.C:
 			s.hideBumper()
+		case <-track.C:
+			s.showTrackDue()
 		case <-s.rescans:
 			s.rescan()
 		case <-ticker.C:
@@ -411,6 +427,7 @@ func (s *station) run(ctx context.Context) error {
 		}
 		s.armDigits(digits)
 		s.armBumper(card)
+		s.armTrack(track)
 	}
 }
 
@@ -450,6 +467,7 @@ const volumeShown = 1500 * time.Millisecond
 const (
 	numberScale = 100
 	volumeScale = 50
+	trackScale  = 50
 )
 
 // volumeCells is how many cells the volume bar has. A full bar is the cap.
@@ -524,6 +542,60 @@ func (s *station) showNumber(number string) {
 		return
 	}
 	s.showText(number, s.settings.ChannelNumber.Duration, numberScale)
+	s.numberUntil = s.now().Add(s.settings.ChannelNumber.Duration)
+}
+
+// scheduleTrack sets when the song just loaded has its title shown: now, or
+// once the channel number is down, and again its last few seconds before it
+// ends. Anything that is not a song clears both.
+func (s *station) scheduleTrack(item schedule.Item, offset time.Duration) {
+	s.trackStartAt, s.trackEndAt, s.trackText = time.Time{}, time.Time{}, ""
+	info := s.settings.TrackInfo
+	if item.Artist == "" || !info.Enabled {
+		return
+	}
+	now := s.now()
+	s.trackText = item.Title + "\n" + item.Artist
+	s.trackStartAt = now
+	if s.numberUntil.After(now) {
+		s.trackStartAt = s.numberUntil
+	}
+	// The ending title only goes up when there is a gap after the opening
+	// one, so a short song or a late join does not show it twice in a row.
+	endAt := now.Add(item.Duration - offset - info.Duration)
+	if endAt.After(s.trackStartAt.Add(info.Duration)) {
+		s.trackEndAt = endAt
+	}
+}
+
+// showTrackDue shows the song's title if one of its times has come.
+func (s *station) showTrackDue() {
+	now := s.now()
+	due := false
+	if !s.trackStartAt.IsZero() && !now.Before(s.trackStartAt) {
+		s.trackStartAt = time.Time{}
+		due = true
+	}
+	if s.trackStartAt.IsZero() && !s.trackEndAt.IsZero() && !now.Before(s.trackEndAt) {
+		s.trackEndAt = time.Time{}
+		due = true
+	}
+	if due && s.trackText != "" {
+		s.showText(s.trackText, s.settings.TrackInfo.Duration, trackScale)
+	}
+}
+
+// armTrack sets the timer for the next title due, and stops it when none is.
+func (s *station) armTrack(timer *time.Timer) {
+	next := s.trackStartAt
+	if next.IsZero() {
+		next = s.trackEndAt
+	}
+	if next.IsZero() {
+		timer.Stop()
+		return
+	}
+	timer.Reset(max(next.Sub(s.now()), 0))
 }
 
 // showText puts text over the picture. A failure costs the viewer a number on
@@ -597,8 +669,10 @@ func (s *station) tuneTo(target input.Channel) {
 		return
 	}
 	s.log.Info("tune", "number", target.Number, "channel", target.ID)
-	s.play()
+	// The number goes up first. It survives the load, and play then knows to
+	// hold a song's title back until it has come down.
 	s.showNumber(strconv.Itoa(target.Number))
+	s.play()
 	s.showBumper(target.ID)
 }
 
@@ -957,6 +1031,7 @@ func (s *station) play() {
 	s.lastLoad = slot.Item.Path
 	s.lastKnown = true
 	s.stalled = false
+	s.scheduleTrack(slot.Item, slot.Offset)
 }
 
 // standby shows the card.
@@ -964,6 +1039,7 @@ func (s *station) standby() error {
 	s.lastKnown = false
 	s.lastLoad = ""
 	s.standbyFailed = false
+	s.trackStartAt, s.trackEndAt, s.trackText = time.Time{}, time.Time{}, ""
 	return s.player.Standby()
 }
 

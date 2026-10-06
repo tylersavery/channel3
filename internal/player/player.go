@@ -315,9 +315,9 @@ func (s *Supervisor) ShowText(text string, d time.Duration, scale int) error {
 
 // escapeOSD keeps text literal inside an expanded, ASS enabled show-text: $$
 // is a literal dollar to property expansion, and \{ and \\ are a literal brace
-// and backslash to ASS.
+// and backslash to ASS. A newline becomes \N, which is ASS's line break.
 func escapeOSD(text string) string {
-	return strings.NewReplacer("$", "$$", "\\", "\\\\", "{", "\\{").Replace(text)
+	return strings.NewReplacer("$", "$$", "\\", "\\\\", "{", "\\{", "\n", "\\N").Replace(text)
 }
 
 // ShowOverlay puts img over the picture at x, y.

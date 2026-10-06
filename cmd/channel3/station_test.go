@@ -2113,3 +2113,101 @@ func TestVolumeBarIsHalfTheNumbersSize(t *testing.T) {
 		t.Errorf("the volume bar is at %d%%, want 50", got)
 	}
 }
+
+// radioChannels is a station of one channel with one long song and one
+// short one, and a video channel to tune from.
+func radioChannels() []schedule.Channel {
+	return []schedule.Channel{
+		{ID: "clips", Number: 5, Name: "Test Clips", Items: []schedule.Item{
+			{ID: "a", Title: "Clip A", Path: "/lib/a.mp4", Duration: 10 * time.Minute},
+		}},
+		{ID: "beatles", Number: 21, Name: "The Beatles", Items: []schedule.Item{
+			{ID: "help", Title: "Help!", Artist: "The Beatles", Path: "/r/help.mp3", Duration: 3 * time.Minute},
+		}},
+	}
+}
+
+// TestSongTitleShowsAtTheStartAndTheEnd is a song playing from the top: its
+// title and artist go up as it starts and again before it ends, at half size.
+func TestSongTitleShowsAtTheStartAndTheEnd(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := newTestStation(t, p, clock, "beatles", radioChannels())
+	s.play()
+	start := clock.Now()
+	offset := p.LastLoad(t).Offset
+
+	s.showTrackDue()
+	got := lastText(t, p)
+	if got.Text != "Help!\nThe Beatles" || got.Scale != 50 || got.Duration != 8*time.Second {
+		t.Errorf("opening title = %+v, want Help! over The Beatles at half size for 8s", got)
+	}
+
+	wantEnd := start.Add(3*time.Minute - offset - 8*time.Second)
+	if !s.trackEndAt.Equal(wantEnd) {
+		t.Fatalf("closing title due at %s, want %s", s.trackEndAt, wantEnd)
+	}
+	before := len(p.Texts())
+	clock.Advance(wantEnd.Sub(clock.Now()))
+	s.showTrackDue()
+	if len(p.Texts()) != before+1 || lastText(t, p).Text != "Help!\nThe Beatles" {
+		t.Error("the closing title did not go up")
+	}
+}
+
+// TestTuningToAStationHoldsTheTitleForTheNumber is a channel change onto a
+// radio station: the number shows first and the title waits for it.
+func TestTuningToAStationHoldsTheTitleForTheNumber(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := newTestStation(t, p, clock, "clips", radioChannels())
+	s.play()
+
+	s.key(input.Key{Action: input.ChannelUp})
+	if got := lastText(t, p).Text; got != "21" {
+		t.Fatalf("tuning showed %q, want the channel number", got)
+	}
+	if want := clock.Now().Add(settings.Default().ChannelNumber.Duration); !s.trackStartAt.Equal(want) {
+		t.Errorf("title due at %s, want once the number is down at %s", s.trackStartAt, want)
+	}
+	s.showTrackDue()
+	if got := lastText(t, p).Text; got != "21" {
+		t.Errorf("the title replaced the number early: %q", got)
+	}
+}
+
+func TestVideoShowsNoTitle(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := newTestStation(t, p, clock, "clips", radioChannels())
+	s.play()
+	if !s.trackStartAt.IsZero() || !s.trackEndAt.IsZero() {
+		t.Error("a video scheduled a title")
+	}
+}
+
+// TestShortSongShowsItsTitleOnce is a song too short for two titles: the
+// closing one would follow straight on from the opening one.
+func TestShortSongShowsItsTitleOnce(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	channels := radioChannels()
+	channels[1].Items[0].Duration = 12 * time.Second
+	s := newTestStation(t, p, clock, "beatles", channels)
+	s.play()
+	if !s.trackEndAt.IsZero() {
+		t.Errorf("a %s song scheduled a closing title at %s", channels[1].Items[0].Duration, s.trackEndAt)
+	}
+}
+
+func TestTrackInfoCanBeTurnedOff(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := newTestStation(t, p, clock, "beatles", radioChannels())
+	s.settings.TrackInfo.Enabled = false
+	s.play()
+	s.showTrackDue()
+	if texts := p.Texts(); len(texts) != 0 {
+		t.Errorf("showed %v with track info off", texts)
+	}
+}

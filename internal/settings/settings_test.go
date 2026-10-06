@@ -107,3 +107,13 @@ func TestVolumeFieldsOverrideTheDefaults(t *testing.T) {
 		t.Errorf("got %+v, want %+v", got.Volume, want.Volume)
 	}
 }
+
+func TestTrackInfoCanBeTuned(t *testing.T) {
+	got, err := Load(writeSettings(t, "track_info:\n  duration: 5s\n"))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got.TrackInfo != (Overlay{Enabled: true, Duration: 5 * time.Second}) {
+		t.Errorf("track info = %+v, want on for 5s", got.TrackInfo)
+	}
+}
