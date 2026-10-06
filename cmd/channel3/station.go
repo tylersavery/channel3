@@ -1022,6 +1022,11 @@ func (s *station) play() {
 		"offset", slot.Offset.Round(time.Millisecond),
 		"now", now.Format(time.RFC3339))
 
+	// The item's loudness correction goes on before it does, so it never
+	// plays a moment at the last item's level.
+	if err := s.player.SetGain(slot.Item.Gain); err != nil {
+		s.log.Warn("could not set the item's loudness correction", "item", slot.Item.ID, "error", err)
+	}
 	if err := s.player.Load(slot.Item.Path, slot.Offset); err != nil {
 		// A failed load is almost always mpv restarting underneath us. The
 		// Restarted event or the next reconcile tick loads again.

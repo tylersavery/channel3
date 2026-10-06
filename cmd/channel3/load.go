@@ -42,6 +42,7 @@ func loadStation(root string) ([]schedule.Channel, error) {
 				ID:       item.ID,
 				Title:    item.Title,
 				Artist:   item.Artist,
+				Gain:     item.Gain,
 				Path:     item.Path,
 				Duration: item.Duration,
 			})
@@ -106,6 +107,7 @@ func ingestLocal(root string) error {
 		Root:      root,
 		Channels:  channels,
 		Prober:    library.FFProbe{Path: "ffprobe"},
+		Measurer:  library.FFmpegLoudness{Path: "ffmpeg", Nice: true},
 		LocalOnly: true,
 		Out:       io.Discard,
 	})

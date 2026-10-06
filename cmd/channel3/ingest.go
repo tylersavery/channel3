@@ -19,6 +19,7 @@ func runIngest(g *globals, args []string) error {
 	dryRun := fs.Bool("dry-run", false, "expand the sources and print the plan without downloading")
 	ytDLP := fs.String("yt-dlp", "yt-dlp", "path to the yt-dlp binary")
 	ffprobe := fs.String("ffprobe", "ffprobe", "path to the ffprobe binary")
+	ffmpeg := fs.String("ffmpeg", "ffmpeg", "path to the ffmpeg binary, which measures loudness")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -38,6 +39,7 @@ func runIngest(g *globals, args []string) error {
 		Channels:  channels,
 		Runner:    library.YTDLP{Path: *ytDLP},
 		Prober:    library.FFProbe{Path: *ffprobe},
+		Measurer:  library.FFmpegLoudness{Path: *ffmpeg},
 		ChannelID: *channel,
 		DryRun:    *dryRun,
 		Out:       os.Stdout,

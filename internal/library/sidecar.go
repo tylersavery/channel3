@@ -39,9 +39,14 @@ const (
 // is how a replaced file is noticed: a sidecar whose size no longer matches the
 // file is stale and the item is ingested again. Times are RFC 3339 in UTC.
 type Sidecar struct {
-	ID          string     `json:"id"`
-	Title       string     `json:"title,omitempty"`
-	Artist      string     `json:"artist,omitempty"`
+	ID     string `json:"id"`
+	Title  string `json:"title,omitempty"`
+	Artist string `json:"artist,omitempty"`
+	// Loudness and TruePeak are the file's EBU R128 measurement, in LUFS and
+	// dBTP, from which playback works out how far to raise or lower it. Absent
+	// for a file not measured yet or with nothing to measure.
+	Loudness    *float64   `json:"loudness,omitempty"`
+	TruePeak    *float64   `json:"true_peak,omitempty"`
 	Source      string     `json:"source"`
 	File        string     `json:"file,omitempty"`
 	Duration    float64    `json:"duration,omitempty"`
@@ -119,7 +124,15 @@ func WriteSidecar(path string, s Sidecar) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	// Written beside and renamed over, so a reader never sees half a sidecar:
+	// serve rescans while the loudness backfill and its own upload ingest are
+	// writing.
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return fmt.Errorf("write sidecar: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
 		return fmt.Errorf("write sidecar: %w", err)
 	}
 	return nil

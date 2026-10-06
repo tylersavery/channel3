@@ -37,6 +37,9 @@ type IngestOptions struct {
 	Out io.Writer
 	// Now supplies sidecar timestamps. Nil means time.Now.
 	Now func() time.Time
+	// Measurer measures each new item's loudness for playback levelling. Nil
+	// leaves new items unmeasured; channel3 loudness can fill them in later.
+	Measurer Measurer
 	// LocalOnly ingests local files and folders only and leaves every URL
 	// source alone, so it needs no runner and touches no network. It is what
 	// serve runs after a home video upload, and it is allowed while serve is
@@ -90,6 +93,7 @@ func Ingest(opts IngestOptions) (Report, error) {
 type ingestRun struct {
 	// localOnly skips every URL source; see IngestOptions.LocalOnly.
 	localOnly bool
+	measurer  Measurer
 	root      string
 	channels  []Channel
 	runner    Runner
@@ -133,6 +137,7 @@ func newIngestRun(opts IngestOptions) (*ingestRun, error) {
 
 	run := &ingestRun{
 		localOnly: opts.LocalOnly,
+		measurer:  opts.Measurer,
 		root:      root,
 		channels:  channels,
 		runner:    opts.Runner,
@@ -451,6 +456,7 @@ func (r *ingestRun) ingestEntry(ch Channel, dir string, source Source, entry Ent
 		// an absolute path in the sidecar still plays.
 		file = result.Path
 	}
+	loudness, peak := r.measure(result.Path)
 	return r.writeOK(ch, dir, Sidecar{
 		ID:       entry.ID,
 		Title:    title,
@@ -458,6 +464,8 @@ func (r *ingestRun) ingestEntry(ch Channel, dir string, source Source, entry Ent
 		File:     file,
 		Duration: duration,
 		Size:     size,
+		Loudness: loudness,
+		TruePeak: peak,
 	})
 }
 
@@ -514,6 +522,7 @@ func (r *ingestRun) ingestLocal(ch Channel, dir string, source Source) error {
 		}
 		artist = tags.Artist
 	}
+	loudness, peak := r.measure(path)
 	return r.writeOK(ch, dir, Sidecar{
 		ID:       id,
 		Title:    title,
@@ -522,7 +531,26 @@ func (r *ingestRun) ingestLocal(ch Channel, dir string, source Source) error {
 		File:     r.sidecarFile(dir, path),
 		Duration: duration,
 		Size:     size,
+		Loudness: loudness,
+		TruePeak: peak,
 	})
+}
+
+// measure returns a new item's loudness and true peak, or nils when there is no
+// measurer, no audio, or the measurement failed. A failure is logged and never
+// fails the item: unmeasured, it simply plays at its own level.
+func (r *ingestRun) measure(path string) (*float64, *float64) {
+	if r.measurer == nil {
+		return nil, nil
+	}
+	l, err := r.measurer.Loudness(path)
+	if err != nil {
+		if !errors.Is(err, ErrNoAudio) {
+			slog.Warn("could not measure loudness, it will play at its own level", "path", path, "error", err)
+		}
+		return nil, nil
+	}
+	return &l.Integrated, &l.TruePeak
 }
 
 // sidecarFile is the path a local item's sidecar records for its video.

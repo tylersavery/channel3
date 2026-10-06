@@ -88,6 +88,9 @@ type Player interface {
 	SetVolume(percent int) error
 	// SetMute mutes or unmutes mpv.
 	SetMute(muted bool) error
+	// SetGain raises or lowers what plays next by dB, on top of the volume,
+	// to bring it to a common loudness. It holds across loads until changed.
+	SetGain(db float64) error
 	// Position reports the file mpv is playing and how far into it. An idle
 	// mpv reports an empty path and a zero offset without an error.
 	Position() (string, time.Duration, error)
@@ -397,6 +400,14 @@ func (s *Supervisor) SetVolume(percent int) error {
 // SetMute sets mpv's mute property.
 func (s *Supervisor) SetMute(muted bool) error {
 	return s.setProperty("mute", muted)
+}
+
+// SetGain sets mpv's volume-gain property. It is a property rather than a
+// loadfile option because, set as an option per file, mpv 0.40 did not apply
+// it; set as a property it holds across loads, which the station relies on by
+// setting it before every one.
+func (s *Supervisor) SetGain(db float64) error {
+	return s.setProperty("volume-gain", db)
 }
 
 // setProperty sets one mpv property.

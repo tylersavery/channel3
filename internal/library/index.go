@@ -17,8 +17,9 @@ import (
 type Item struct {
 	ID       string
 	Title    string
-	Artist   string // a song's artist; empty for video
-	Path     string // absolute path to the video file
+	Artist   string  // a song's artist; empty for video
+	Gain     float64 // dB to raise or lower it by to meet TargetLUFS; 0 when unmeasured
+	Path     string  // absolute path to the video file
 	Duration time.Duration
 	Source   string
 }
@@ -156,6 +157,7 @@ func itemFromSidecar(absRoot, channelID, dir string, s Sidecar) (Item, bool) {
 		ID:       s.ID,
 		Title:    s.Title,
 		Artist:   s.Artist,
+		Gain:     sidecarGain(s),
 		Path:     path,
 		Duration: durationFromSeconds(s.Duration),
 		Source:   s.Source,
@@ -189,4 +191,13 @@ func insideRoot(absRoot, dir, file string) (string, bool) {
 // to the nearest nanosecond so 612.437 does not land a nanosecond short.
 func durationFromSeconds(seconds float64) time.Duration {
 	return time.Duration(math.Round(seconds * float64(time.Second)))
+}
+
+// sidecarGain is the playback gain a sidecar's measurement calls for, or 0 for
+// a file that has not been measured.
+func sidecarGain(s Sidecar) float64 {
+	if s.Loudness == nil || s.TruePeak == nil {
+		return 0
+	}
+	return Gain(Loudness{Integrated: *s.Loudness, TruePeak: *s.TruePeak})
 }

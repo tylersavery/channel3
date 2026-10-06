@@ -1817,3 +1817,60 @@ func TestIngestFolderOfSongsUsesTheirTags(t *testing.T) {
 		t.Errorf("the second run retitled the song %q", got)
 	}
 }
+
+// fakeMeasurer answers every file with one measurement, or an error.
+type fakeMeasurer struct {
+	l   Loudness
+	err error
+}
+
+func (m fakeMeasurer) Loudness(string) (Loudness, error) { return m.l, m.err }
+
+// TestIngestMeasuresLoudness is a new item measured as it is ingested, and the
+// index turning that into the gain playback applies.
+func TestIngestMeasuresLoudness(t *testing.T) {
+	captureLogs(t)
+	f := newIngestFixture(t)
+	local := filepath.Join(t.TempDir(), "Quiet Cartoon.mp4")
+	copyTinyMP4(t, local)
+
+	report, err := Ingest(IngestOptions{
+		Root: f.root, Channels: trainsChannel("file://" + local),
+		Runner: f.runner, Prober: f.prober, Out: io.Discard,
+		Measurer: fakeMeasurer{l: Loudness{Integrated: -25.4, TruePeak: -12}},
+	})
+	if err != nil || report.OK != 1 {
+		t.Fatalf("Ingest = %+v, %v", report, err)
+	}
+	s := f.sidecar(t, "trains", "quiet-cartoon")
+	if s.Loudness == nil || *s.Loudness != -25.4 || s.TruePeak == nil || *s.TruePeak != -12 {
+		t.Fatalf("sidecar loudness %v, peak %v, want -25.4 and -12", s.Loudness, s.TruePeak)
+	}
+	ix, err := Scan(f.root, trainsChannel("file://"+local))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ix.Items("trains")[0].Gain; got != 9.4 {
+		t.Errorf("gain = %v, want 9.4 to bring -25.4 LUFS up to the target", got)
+	}
+}
+
+// TestUnmeasurableItemStillIngests is a measurement that fails: the item is
+// ingested anyway, unmeasured, and plays at its own level.
+func TestUnmeasurableItemStillIngests(t *testing.T) {
+	captureLogs(t)
+	f := newIngestFixture(t)
+	local := filepath.Join(t.TempDir(), "Odd File.mp4")
+	copyTinyMP4(t, local)
+	report, err := Ingest(IngestOptions{
+		Root: f.root, Channels: trainsChannel("file://" + local),
+		Runner: f.runner, Prober: f.prober, Out: io.Discard,
+		Measurer: fakeMeasurer{err: errors.New("ffmpeg fell over")},
+	})
+	if err != nil || report.OK != 1 {
+		t.Fatalf("Ingest = %+v, %v, want the item ok regardless", report, err)
+	}
+	if s := f.sidecar(t, "trains", "odd-file"); s.Loudness != nil {
+		t.Errorf("an unmeasured item recorded loudness %v", *s.Loudness)
+	}
+}

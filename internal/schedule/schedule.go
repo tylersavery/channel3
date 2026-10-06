@@ -24,7 +24,10 @@ type Item struct {
 	Title string
 	// Artist is a song's artist, which is also what marks an item as a song
 	// on screen. Empty for video.
-	Artist   string
+	Artist string
+	// Gain is the dB to raise or lower the item by so every item plays at
+	// about the same loudness. Zero leaves it at its own level.
+	Gain     float64
 	Path     string
 	Duration time.Duration
 }

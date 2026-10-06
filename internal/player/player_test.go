@@ -608,3 +608,15 @@ func TestEscapeOSDBreaksLines(t *testing.T) {
 		t.Errorf("escapeOSD = %q, want %q", got, want)
 	}
 }
+
+func TestSetGainSetsVolumeGain(t *testing.T) {
+	launcher := &fakeLauncher{t: t}
+	sup := startSupervisor(t, launcher, testTimings())
+	if err := sup.SetGain(9.4); err != nil {
+		t.Fatalf("set gain: %v", err)
+	}
+	got := launcher.Current().CommandsNamed("set_property")
+	if len(got) != 1 || got[0][1] != "volume-gain" || got[0][2] != 9.4 {
+		t.Errorf("sent %v, want set_property volume-gain 9.4", got)
+	}
+}

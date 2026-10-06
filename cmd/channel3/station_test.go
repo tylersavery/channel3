@@ -40,6 +40,7 @@ type fakePlayer struct {
 	texts     []textCall
 	volumes   []int
 	mutes     []bool
+	gains     []float64
 	overlays  []overlayCall
 	removed   []int
 	screen    image.Point
@@ -131,6 +132,13 @@ func (p *fakePlayer) SetMute(muted bool) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.mutes = append(p.mutes, muted)
+	return nil
+}
+
+func (p *fakePlayer) SetGain(db float64) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.gains = append(p.gains, db)
 	return nil
 }
 
@@ -2209,5 +2217,22 @@ func TestTrackInfoCanBeTurnedOff(t *testing.T) {
 	s.showTrackDue()
 	if texts := p.Texts(); len(texts) != 0 {
 		t.Errorf("showed %v with track info off", texts)
+	}
+}
+
+// TestEachItemPlaysAtItsOwnGain is the levelling: the correction for the item
+// about to play is set before it loads.
+func TestEachItemPlaysAtItsOwnGain(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	channels := radioChannels()
+	channels[1].Items[0].Gain = -7.8
+	s := newTestStation(t, p, clock, "beatles", channels)
+	s.play()
+	p.mu.Lock()
+	gains := append([]float64(nil), p.gains...)
+	p.mu.Unlock()
+	if len(gains) != 1 || gains[0] != -7.8 {
+		t.Errorf("gains set %v, want the song's -7.8 before it loaded", gains)
 	}
 }
