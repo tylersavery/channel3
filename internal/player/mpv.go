@@ -75,6 +75,11 @@ func BaseArgs(socket string) []string {
 		"--image-display-duration=inf",
 		// A song plays to a black screen, never to its embedded cover art.
 		"--audio-display=no",
+		// With no video to show, mpv would otherwise close its output, and the
+		// Linux console behind it, boot text and all, shows on the television.
+		// Kept open, a song is a black screen and the screen still has a size
+		// for the channel's card and the song's title to be drawn on.
+		"--force-window=yes",
 		"--input-ipc-server=" + socket,
 	}
 }

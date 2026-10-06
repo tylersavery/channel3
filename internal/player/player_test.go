@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -618,5 +619,16 @@ func TestSetGainSetsVolumeGain(t *testing.T) {
 	got := launcher.Current().CommandsNamed("set_property")
 	if len(got) != 1 || got[0][1] != "volume-gain" || got[0][2] != 9.4 {
 		t.Errorf("sent %v, want set_property volume-gain 9.4", got)
+	}
+}
+
+// TestBaseArgsKeepTheScreenForSongs is the radio's black screen: no cover art,
+// and an output that stays open with no video, so the console never shows.
+func TestBaseArgsKeepTheScreenForSongs(t *testing.T) {
+	args := BaseArgs("/run/mpv.sock")
+	for _, want := range []string{"--audio-display=no", "--force-window=yes"} {
+		if !slices.Contains(args, want) {
+			t.Errorf("BaseArgs lacks %s: %v", want, args)
+		}
 	}
 }
