@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"strings"
@@ -33,24 +34,34 @@ const maxUpload = 8 << 30
 // multipart form with a file field also works. The PIN travels in X-Upload-PIN,
 // or a pin form field.
 func (s *server) handleUpload(w http.ResponseWriter, r *http.Request) {
+	// Every attempt is logged with why it was refused, because the phone's
+	// Shortcut shows the person sending little more than that it failed.
+	reject := func(status int, message string) {
+		slog.Warn("upload refused", "from", r.RemoteAddr, "status", status, "reason", message,
+			"content type", r.Header.Get("Content-Type"), "filename", r.Header.Get("X-Filename"),
+			"length", r.ContentLength)
+		writeError(w, status, message)
+	}
+	slog.Info("upload attempt", "from", r.RemoteAddr, "method", r.Method,
+		"content type", r.Header.Get("Content-Type"), "length", r.ContentLength)
 	if s.deps.Uploads == nil || s.deps.UploadPIN == "" {
-		writeError(w, http.StatusNotFound, "uploads are off on this box")
+		reject(http.StatusNotFound, "uploads are off on this box")
 		return
 	}
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
-		writeError(w, http.StatusMethodNotAllowed, "send the clip with POST")
+		reject(http.StatusMethodNotAllowed, "send the clip with POST")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxUpload)
 
 	name, body, pin, err := uploadParts(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		reject(http.StatusBadRequest, err.Error())
 		return
 	}
 	if subtle.ConstantTimeCompare([]byte(pin), []byte(s.deps.UploadPIN)) != 1 {
-		writeError(w, http.StatusForbidden, "wrong PIN")
+		reject(http.StatusForbidden, "wrong PIN")
 		return
 	}
 
@@ -58,10 +69,10 @@ func (s *server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var tooBig *http.MaxBytesError
 		if errors.As(err, &tooBig) {
-			writeError(w, http.StatusRequestEntityTooLarge, "the clip is larger than 8 GB")
+			reject(http.StatusRequestEntityTooLarge, "the clip is larger than 8 GB")
 			return
 		}
-		writeError(w, http.StatusBadRequest, err.Error())
+		reject(http.StatusBadRequest, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{
