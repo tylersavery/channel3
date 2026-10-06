@@ -167,3 +167,21 @@ func TestEverythingElseStaysReadOnly(t *testing.T) {
 		}
 	}
 }
+
+// TestTextBodyIsRefusedWithAHint is a Shortcut whose File body held the clip's
+// name rather than the clip.
+func TestTextBodyIsRefusedWithAHint(t *testing.T) {
+	for _, contentType := range []string{"text/plain", "application/json", "application/x-www-form-urlencoded"} {
+		up := &fakeUploads{}
+		r := rawUpload("6635", "", "IMG_1234")
+		r.Header.Set("Content-Type", contentType)
+		rec := httptest.NewRecorder()
+		uploadServer(up, "6635").ServeHTTP(rec, r)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "set the request body to File") {
+			t.Errorf("%s: status %d, %s, want 400 with the fix", contentType, rec.Code, rec.Body)
+		}
+		if up.name != "" {
+			t.Errorf("%s: a text body was stored", contentType)
+		}
+	}
+}

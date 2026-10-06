@@ -100,6 +100,12 @@ func videoExt(mediaType string) string {
 // request.
 func uploadParts(r *http.Request) (string, io.Reader, string, error) {
 	mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if strings.HasPrefix(mediaType, "text/") || mediaType == "application/json" ||
+		mediaType == "application/x-www-form-urlencoded" {
+		// What a Shortcut sends when its File body holds the clip's name, or
+		// its body is set to JSON or Form, rather than the clip itself.
+		return "", nil, "", errors.New("the body is " + mediaType + ", not a video: set the request body to File and pick the shared video itself")
+	}
 	if mediaType != "multipart/form-data" {
 		name := strings.TrimSpace(r.Header.Get("X-Filename"))
 		if name == "" {
