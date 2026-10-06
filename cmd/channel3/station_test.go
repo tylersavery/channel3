@@ -2236,3 +2236,100 @@ func TestEachItemPlaysAtItsOwnGain(t *testing.T) {
 		t.Errorf("gains set %v, want the song's -7.8 before it loaded", gains)
 	}
 }
+
+// guideChannels is the radio fixture with a guide on 1 whose music is the
+// Beatles station.
+func guideChannels() []schedule.Channel {
+	channels := radioChannels()
+	beatles := channels[1]
+	guide := schedule.Channel{ID: "guide", Number: 1, Name: "Guide", Items: beatles.Items, Guide: true, GuideMusic: beatles.ID}
+	return append([]schedule.Channel{guide}, channels...)
+}
+
+// overlaysWithID counts the ShowOverlay calls for one overlay id.
+func overlaysWithID(p *fakePlayer, id int) []overlayCall {
+	var out []overlayCall
+	for _, o := range p.Overlays() {
+		if o.ID == id {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// TestGuideGoesUpAndComesDown is tuning to the guide and away again: its page
+// covers the whole screen while it is tuned and is taken down after.
+func TestGuideGoesUpAndComesDown(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := newTestStation(t, p, clock, "clips", guideChannels())
+	s.play()
+
+	s.key(input.Key{Action: input.Digit, Digit: 1})
+	clock.Advance(2 * time.Second)
+	s.expireDigits()
+	if s.Tuned() != "guide" {
+		t.Fatalf("tuned %q, want the guide", s.Tuned())
+	}
+	pages := overlaysWithID(p, guideOverlay)
+	if len(pages) != 1 || pages[0].Size != image.Pt(1920, 1080) || pages[0].X != 0 || pages[0].Y != 0 {
+		t.Fatalf("guide overlays %+v, want one full screen page", pages)
+	}
+
+	s.key(input.Key{Action: input.ChannelUp})
+	if s.Tuned() == "guide" {
+		t.Fatal("channel up stayed on the guide")
+	}
+	removed := false
+	for _, id := range p.Removed() {
+		removed = removed || id == guideOverlay
+	}
+	if !removed {
+		t.Error("leaving the guide did not take it down")
+	}
+}
+
+// TestGuidePagesTurnAndListTheOtherChannels checks the rows: every channel but
+// the guide, the channel the viewer came from highlighted, and a page flip
+// drawing the guide again.
+func TestGuidePagesTurnAndListTheOtherChannels(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := newTestStation(t, p, clock, "clips", guideChannels())
+	s.play()
+	s.key(input.Key{Action: input.ChannelDown}) // clips 5 -> guide 1
+	if s.Tuned() != "guide" {
+		t.Fatalf("tuned %q, want the guide", s.Tuned())
+	}
+
+	rows := s.guideRows()
+	if len(rows) != 2 || rows[0].Number != 5 || rows[1].Number != 21 {
+		t.Fatalf("rows %+v, want channels 5 and 21 and not the guide", rows)
+	}
+	if !rows[0].Highlight || rows[1].Highlight {
+		t.Errorf("highlights %v %v, want the channel the viewer came from", rows[0].Highlight, rows[1].Highlight)
+	}
+	if rows[1].Now != "Help! · The Beatles" {
+		t.Errorf("the radio row reads %q, want the song and artist", rows[1].Now)
+	}
+
+	before := len(overlaysWithID(p, guideOverlay))
+	clock.Advance(guideFlip)
+	s.flipGuide()
+	if got := len(overlaysWithID(p, guideOverlay)); got != before+1 {
+		t.Errorf("a flip drew the guide %d more times, want once", got-before)
+	}
+}
+
+func TestGuideShowsNoSongTitles(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := newTestStation(t, p, clock, "guide", guideChannels())
+	s.play()
+	if !s.trackStartAt.IsZero() || !s.trackEndAt.IsZero() {
+		t.Error("the guide's background song scheduled a title over the listings")
+	}
+	if got := s.guideMusic(); got != "Help! · The Beatles" {
+		t.Errorf("guide music %q, want the song playing behind it", got)
+	}
+}

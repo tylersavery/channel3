@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -186,8 +187,9 @@ func serve(ctx context.Context, root string, opts serveOptions) error {
 			if s := current.Load(); s != nil {
 				// The exclusions go with it, so the guide shows the order the
 				// television is really playing rather than one that still
-				// includes a file mpv could not open.
-				return s.PlayableChannels()
+				// includes a file mpv could not open. The on-screen guide is
+				// left out: on a phone it would only repeat its music channel.
+				return slices.DeleteFunc(s.PlayableChannels(), func(ch schedule.Channel) bool { return ch.Guide })
 			}
 			return nil
 		},

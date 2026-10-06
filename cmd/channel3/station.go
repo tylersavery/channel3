@@ -83,6 +83,13 @@ type station struct {
 	trackStartAt time.Time
 	trackEndAt   time.Time
 	trackText    string
+	// guideUp says the guide is on screen; guidePage is its page, and
+	// guideFlipAt when it turns. cameFrom is the channel tuned before the
+	// guide, which it highlights.
+	guideUp     bool
+	guidePage   int
+	guideFlipAt time.Time
+	cameFrom    string
 	// volume and muted are mpv's level and mute, when the remote's volume
 	// buttons are the Pi's. Held in memory only: every start is at
 	// settings.Volume.Start.
@@ -128,8 +135,14 @@ type station struct {
 }
 
 // bumperOverlay is the mpv overlay id the channel's card is drawn under. One
-// card is up at a time, so one id is enough.
-const bumperOverlay = 1
+// card is up at a time, so one id is enough. guideOverlay is the guide's page.
+const (
+	bumperOverlay = 1
+	guideOverlay  = 2
+)
+
+// guideFlip is how long each page of the guide stays up before the next.
+const guideFlip = 10 * time.Second
 
 // excludedItem names one item excluded for the day.
 type excludedItem struct {
@@ -377,6 +390,11 @@ func (s *station) run(ctx context.Context) error {
 	track.Stop()
 	defer track.Stop()
 
+	// guide fires when the guide's page turns.
+	guide := time.NewTimer(time.Hour)
+	guide.Stop()
+	defer guide.Stop()
+
 	// Television keys are sent on their own goroutine. cec-ctl can sit for its
 	// full timeout against a set that is off, and an end-file event arriving
 	// meanwhile must not wait behind it: the screen would hold a finished item
@@ -420,6 +438,8 @@ func (s *station) run(ctx context.Context) error {
 			s.hideBumper()
 		case <-track.C:
 			s.showTrackDue()
+		case <-guide.C:
+			s.flipGuide()
 		case <-s.rescans:
 			s.rescan()
 		case <-ticker.C:
@@ -428,6 +448,7 @@ func (s *station) run(ctx context.Context) error {
 		s.armDigits(digits)
 		s.armBumper(card)
 		s.armTrack(track)
+		s.armGuide(guide)
 	}
 }
 
@@ -555,6 +576,11 @@ func (s *station) scheduleTrack(item schedule.Item, offset time.Duration) {
 	if item.Artist == "" || !info.Enabled {
 		return
 	}
+	if ch, ok := s.channel(s.tuned); ok && ch.Guide {
+		// The guide names its background song in its own footer, and a title
+		// over the listings would only get in the way.
+		return
+	}
 	now := s.now()
 	s.trackText = item.Title + "\n" + item.Artist
 	s.trackStartAt = now
@@ -665,6 +691,9 @@ func (s *station) armDigits(timer *time.Timer) {
 // Nothing about the old channel is remembered. The new channel is joined at
 // whatever it is up to, exactly as it would be on a television.
 func (s *station) tuneTo(target input.Channel) {
+	if ch, ok := s.channel(s.tuned); ok && !ch.Guide {
+		s.cameFrom = s.tuned
+	}
 	if err := s.tune(target.ID); err != nil {
 		s.log.Error("could not tune", "channel", target.ID, "error", err)
 		return
@@ -990,6 +1019,7 @@ func (s *station) repeatingFailure() bool {
 
 // play asks the schedule what the tuned channel is airing and loads it.
 func (s *station) play() {
+	s.syncGuide()
 	now := s.now()
 	if len(s.channels) == 0 {
 		// A station with nothing configured. This is a normal state on a box
@@ -1246,4 +1276,130 @@ func findByPath(items []schedule.Item, path string) (schedule.Item, bool) {
 		}
 	}
 	return schedule.Item{}, false
+}
+
+// syncGuide puts the guide up when the tuned channel is the guide and takes it
+// down when it is not. It runs at every load, so it follows every way of
+// arriving: a key, startup, a rollover or a rescan.
+func (s *station) syncGuide() {
+	ch, ok := s.channel(s.tuned)
+	onGuide := ok && ch.Guide
+	switch {
+	case onGuide && !s.guideUp:
+		// Up before it is drawn, so a page that cannot be drawn yet (mpv
+		// still starting, say) is tried again at the next flip.
+		s.guideUp = true
+		s.guidePage = 0
+		s.showGuidePage()
+	case !onGuide && s.guideUp:
+		s.guideUp = false
+		s.guideFlipAt = time.Time{}
+		if err := s.player.RemoveOverlay(guideOverlay); err != nil {
+			s.log.Warn("could not take the guide down", "error", err)
+		}
+	}
+}
+
+// flipGuide turns to the guide's next page, which is also when its times and
+// what is on are brought up to date.
+func (s *station) flipGuide() {
+	if !s.guideUp {
+		return
+	}
+	s.guidePage++
+	s.showGuidePage()
+}
+
+// showGuidePage draws the current page of the guide and puts it up.
+func (s *station) showGuidePage() {
+	w, h, err := s.player.ScreenSize()
+	if err != nil {
+		s.log.Warn("no screen size for the guide", "error", err)
+		s.guideFlipAt = s.now().Add(guideFlip)
+		return
+	}
+	rows := s.guideRows()
+	pages := max((len(rows)+bumper.GuideRowsPerPage-1)/bumper.GuideRowsPerPage, 1)
+	s.guidePage %= pages
+	first := s.guidePage * bumper.GuideRowsPerPage
+	page := bumper.GuidePage{
+		Clock: s.now().In(s.clockLocation()).Format("3:04 PM"),
+		Rows:  rows[first:min(first+bumper.GuideRowsPerPage, len(rows))],
+		Music: s.guideMusic(),
+		Page:  s.guidePage + 1, Pages: pages,
+	}
+	img, err := bumper.RenderGuide(page, w, h)
+	if err != nil {
+		s.log.Warn("could not draw the guide", "error", err)
+		s.guideFlipAt = s.now().Add(guideFlip)
+		return
+	}
+	s.guideFlipAt = s.now().Add(guideFlip)
+	if err := s.player.ShowOverlay(guideOverlay, img, 0, 0); err != nil {
+		s.log.Warn("could not show the guide", "error", err)
+	}
+}
+
+// guideRows is every channel but the guide itself, in number order, with what
+// is on now and next.
+func (s *station) guideRows() []bumper.GuideRow {
+	now := s.now()
+	loc := s.clockLocation()
+	var rows []bumper.GuideRow
+	for _, ch := range s.channels {
+		if ch.Guide {
+			continue
+		}
+		row := bumper.GuideRow{Number: ch.Number, Name: ch.Name, Highlight: ch.ID == s.cameFrom}
+		if card, ok := s.cards[ch.ID]; ok {
+			row.Icon, row.Color = card.Icon, card.Color
+		}
+		slots := schedule.Guide(s.playable(ch), now, 6*time.Hour, s.clock)
+		if len(slots) > 0 {
+			row.Now = itemLabel(slots[0].Item)
+			row.NowUntil = slots[0].End.In(loc).Format("3:04 PM")
+		}
+		if len(slots) > 1 {
+			row.Next = itemLabel(slots[1].Item)
+			row.NextAt = slots[1].Start.In(loc).Format("3:04")
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// guideMusic names the song playing behind the guide, or "" for none.
+func (s *station) guideMusic() string {
+	ch, ok := s.channel(s.tuned)
+	if !ok {
+		return ""
+	}
+	slot, ok := schedule.At(s.playable(ch), s.now(), s.clock)
+	if !ok {
+		return ""
+	}
+	return itemLabel(slot.Item)
+}
+
+// itemLabel is a guide line for an item: its title, and a song's artist.
+func itemLabel(item schedule.Item) string {
+	if item.Artist == "" {
+		return item.Title
+	}
+	return item.Title + " · " + item.Artist
+}
+
+// clockLocation is the zone the station's clock reads in.
+func (s *station) clockLocation() *time.Location {
+	return s.clock.BroadcastDay(s.now()).Location()
+}
+
+// armGuide sets the timer for the guide's next page, and stops it when the
+// guide is not up.
+func (s *station) armGuide(timer *time.Timer) {
+	if !s.guideUp || s.guideFlipAt.IsZero() {
+		timer.Stop()
+		return
+	}
+	timer.Reset(max(s.guideFlipAt.Sub(s.now()), 0))
 }
