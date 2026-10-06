@@ -299,12 +299,59 @@ func expandFolders(root string, sources []Source) []Source {
 	return out
 }
 
+// youtubeVideoID matches a YouTube video id.
+var youtubeVideoID = regexp.MustCompile(`^[A-Za-z0-9_-]{11}$`)
+
+// singleVideoID returns the video id of a link to exactly one YouTube video:
+// watch?v= with no playlist, youtu.be, shorts or live. A playlist, a channel,
+// or any other site is not a single video, since only expanding it tells what
+// it holds.
+func singleVideoID(raw string) (string, bool) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", false
+	}
+	host := strings.TrimPrefix(strings.ToLower(u.Hostname()), "www.")
+	host = strings.TrimPrefix(host, "m.")
+	var id string
+	switch {
+	case host == "youtu.be":
+		id = strings.Trim(u.Path, "/")
+	case host == "youtube.com" && u.Path == "/watch":
+		if u.Query().Get("list") != "" {
+			return "", false
+		}
+		id = u.Query().Get("v")
+	case host == "youtube.com" && (strings.HasPrefix(u.Path, "/shorts/") || strings.HasPrefix(u.Path, "/live/")):
+		id = strings.Trim(u.Path[strings.Index(u.Path[1:], "/")+1:], "/")
+	default:
+		return "", false
+	}
+	if !youtubeVideoID.MatchString(id) {
+		return "", false
+	}
+	return id, true
+}
+
 // ingestRemote expands one URL and ingests everything it names.
 //
 // Expansion always runs, even when every video behind the source is already in
 // the library, because that is the only way a video added to a playlist since
 // the last run is noticed.
 func (r *ingestRun) ingestRemote(ch Channel, dir string, source Source) error {
+	// A link to one video that is already in the library needs nothing from
+	// the network. Expanding it anyway cost one YouTube request per item per
+	// run, and a few hundred of those an evening is what got the house's
+	// address rate limited. Only a playlist can gain videos, so only a
+	// playlist is expanded every time.
+	if id, ok := singleVideoID(source.URL); ok {
+		if existing, done := r.alreadyIngested(dir, id); done {
+			if err := r.clearSourceFailure(dir, source.URL); err != nil {
+				return err
+			}
+			return r.keepOrRetitle(ch, dir, existing, cmp.Or(source.Title, existing.Title))
+		}
+	}
 	entries, err := r.runner.Expand(source.URL)
 	if err != nil {
 		return r.fail(ch, dir, sourceID(source.URL), source.URL, err)

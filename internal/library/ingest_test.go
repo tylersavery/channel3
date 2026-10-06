@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -1689,5 +1690,70 @@ func TestLocalOnlyIngestRunsBesideABroadcast(t *testing.T) {
 	}
 	if report != (Report{OK: 1}) {
 		t.Errorf("report = %+v, want the one clip ok and the URL untouched", report)
+	}
+}
+
+func TestSingleVideoID(t *testing.T) {
+	cases := map[string]string{
+		"https://www.youtube.com/watch?v=7fwZuZK2Qww":                 "7fwZuZK2Qww",
+		"https://youtube.com/watch?v=-3reWHZuNHI&t=42s":               "-3reWHZuNHI",
+		"https://youtu.be/LczNJtTrDjE?si=JZ9OQyh0cPlM4K0j":            "LczNJtTrDjE",
+		"https://m.youtube.com/watch?v=7fwZuZK2Qww":                   "7fwZuZK2Qww",
+		"https://www.youtube.com/live/QcOVj3mYtvQ?feature=shared":     "QcOVj3mYtvQ",
+		"https://www.youtube.com/shorts/7fwZuZK2Qww":                  "7fwZuZK2Qww",
+		"https://www.youtube.com/watch?v=7fwZuZK2Qww&list=PLabcdefgh": "",
+		"https://www.youtube.com/playlist?list=PLabcdefgh":            "",
+		"https://www.youtube.com/@primitivetechnology9550":            "",
+		"https://vimeo.com/123456789":                                 "",
+		"https://sylvan.apple.com/Videos/x.mov":                       "",
+		"https://www.youtube.com/watch?v=short":                       "",
+	}
+	for raw, want := range cases {
+		got, ok := singleVideoID(raw)
+		if want == "" && ok {
+			t.Errorf("singleVideoID(%q) = %q, want not a single video", raw, got)
+		}
+		if want != "" && (!ok || got != want) {
+			t.Errorf("singleVideoID(%q) = %q, %v, want %q", raw, got, ok, want)
+		}
+	}
+}
+
+// TestIngestedSingleVideoIsNotLookedUpAgain is the rate limit fix: a second
+// run over a video already in the library makes no request at all, while a
+// playlist is still expanded so a video added to it is noticed.
+func TestIngestedSingleVideoIsNotLookedUpAgain(t *testing.T) {
+	captureLogs(t)
+	f := newIngestFixture(t)
+	const video = "https://www.youtube.com/watch?v=7fwZuZK2Qww"
+	const playlist = "https://www.youtube.com/playlist?list=PLabcdefgh"
+	f.runner.entries[video] = []Entry{{ID: "7fwZuZK2Qww", URL: video, Title: "Combine Time"}}
+	f.runner.titles[video] = "Combine Time"
+	f.runner.entries[playlist] = []Entry{{ID: "zulu002", URL: "https://www.youtube.com/watch?v=zulu002", Title: "Tumbling Time"}}
+	f.runner.titles["https://www.youtube.com/watch?v=zulu002"] = "Tumbling Time"
+	if _, err := f.run(trainsChannel(video, playlist)); err != nil {
+		t.Fatalf("first Ingest: %v", err)
+	}
+
+	second := newIngestFixture(t)
+	second.root = f.root
+	second.runner.entries[playlist] = f.runner.entries[playlist]
+	report, err := second.run(trainsChannelWith(Source{URL: video, Title: "Combine Time & Other Stories"}, Source{URL: playlist}))
+	if err != nil {
+		t.Fatalf("second Ingest: %v", err)
+	}
+	for _, call := range second.runner.calls {
+		if strings.Contains(call, "7fwZuZK2Qww") {
+			t.Errorf("the ingested video was looked up again: %q", call)
+		}
+	}
+	if !slices.Contains(second.runner.calls, "expand "+playlist) {
+		t.Errorf("the playlist was not expanded: %v", second.runner.calls)
+	}
+	if got := second.sidecar(t, "trains", "7fwZuZK2Qww").Title; got != "Combine Time & Other Stories" {
+		t.Errorf("a changed title was not applied without a lookup: %q", got)
+	}
+	if report.OK != 1 || report.Skipped != 1 {
+		t.Errorf("report = %+v, want the retitle ok and the playlist item skipped", report)
 	}
 }
