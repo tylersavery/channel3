@@ -6,6 +6,7 @@ import (
 	"image"
 	"log/slog"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -69,6 +70,11 @@ type station struct {
 	renderedFor image.Point
 	// bumperUntil is when the card on screen comes down; zero when none is up.
 	bumperUntil time.Time
+	// volume and muted are mpv's level and mute, when the remote's volume
+	// buttons are the Pi's. Held in memory only: every start is at
+	// settings.Volume.Start.
+	volume int
+	muted  bool
 
 	// channels is the whole station, replaced wholesale at every rollover.
 	// The loop is its only writer and reads it directly; the API reads a copy
@@ -186,6 +192,7 @@ func newStation(opts stationOptions) (*station, error) {
 	}
 	s.loadCards = opts.Cards
 	s.refreshCards()
+	s.volume = s.settings.Volume.Start
 
 	channels, err := s.reload()
 	if err != nil {
@@ -330,6 +337,7 @@ func tunerChannels(channels []schedule.Channel) []input.Channel {
 // card rather than a black screen or a terminal while the first item is found
 // and loaded.
 func (s *station) run(ctx context.Context) error {
+	s.applyVolume()
 	if err := s.standby(); err != nil {
 		s.log.Error("could not show the stand by card", "error", err)
 	}
@@ -402,8 +410,15 @@ func (s *station) run(ctx context.Context) error {
 // key acts on one press.
 func (s *station) key(k input.Key) {
 	switch k.Action {
-	case input.Power, input.VolumeUp, input.VolumeDown, input.Mute:
+	case input.Power:
 		s.control(k)
+		return
+	case input.VolumeUp, input.VolumeDown, input.Mute:
+		if s.settings.Volume.Control == settings.VolumeOnTV {
+			s.control(k)
+		} else {
+			s.adjustVolume(k)
+		}
 		return
 	}
 
@@ -417,6 +432,63 @@ func (s *station) key(k input.Key) {
 		s.showTyping()
 		s.reportNumber(pending+strconv.Itoa(k.Digit), target)
 	}
+}
+
+// volumeShown is how long the volume bar stays up after a press.
+const volumeShown = 1500 * time.Millisecond
+
+// volumeCells is how many cells the volume bar has. A full bar is the cap.
+const volumeCells = 10
+
+// adjustVolume acts on a volume or mute press when the Pi owns the volume.
+//
+// Up stops at the cap and down at zero, and either one unmutes, the way a
+// television does. A press at the cap still puts the full bar up, so a child
+// holding the button can see it has stopped.
+func (s *station) adjustVolume(k input.Key) {
+	v := s.settings.Volume
+	switch k.Action {
+	case input.VolumeUp:
+		s.volume = min(s.volume+v.Step, v.Max)
+		s.muted = false
+	case input.VolumeDown:
+		s.volume = max(s.volume-v.Step, 0)
+		s.muted = false
+	case input.Mute:
+		s.muted = !s.muted
+	}
+	s.log.Info("volume", "percent", s.volume, "max", v.Max, "muted", s.muted)
+	s.applyVolume()
+	if v.Show {
+		s.showText(volumeBar(s.volume, v.Max, s.muted), volumeShown)
+	}
+}
+
+// applyVolume hands mpv the station's volume and mute, when the Pi owns the
+// volume. It runs at startup and after mpv restarts, as well as on a press.
+func (s *station) applyVolume() {
+	if s.settings.Volume.Control != settings.VolumeOnPi {
+		return
+	}
+	if err := s.player.SetVolume(s.volume); err != nil {
+		s.log.Warn("could not set the volume", "percent", s.volume, "error", err)
+	}
+	if err := s.player.SetMute(s.muted); err != nil {
+		s.log.Warn("could not set mute", "muted", s.muted, "error", err)
+	}
+}
+
+// volumeBar draws the level as cells, full at the cap, or MUTE.
+func volumeBar(level, ceiling int, muted bool) string {
+	if muted {
+		return "MUTE"
+	}
+	filled := 0
+	if ceiling > 0 {
+		filled = (level*volumeCells + ceiling/2) / ceiling
+	}
+	filled = min(max(filled, 0), volumeCells)
+	return "VOL " + strings.Repeat("█", filled) + strings.Repeat("░", volumeCells-filled)
 }
 
 // showTyping puts a half typed channel number up with a dash for the digit
@@ -689,6 +761,8 @@ func (s *station) handle(ev player.Event) {
 		s.play()
 	case player.Restarted:
 		s.log.Warn("mpv restarted, reloading the current item")
+		// A fresh mpv starts at full volume, which is past the cap.
+		s.applyVolume()
 		s.play()
 	default:
 		s.log.Warn("ignoring an unknown player event", "kind", ev.Kind)

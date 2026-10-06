@@ -224,7 +224,8 @@ func serve(ctx context.Context, root string, opts serveOptions) error {
 	}
 	slog.Info("on-screen settings",
 		"channel number", look.ChannelNumber.Enabled, "number for", look.ChannelNumber.Duration,
-		"bumpers", look.Bumper.Enabled, "bumper for", look.Bumper.Duration)
+		"bumpers", look.Bumper.Enabled, "bumper for", look.Bumper.Duration,
+		"volume on", look.Volume.Control, "volume start", look.Volume.Start, "volume max", look.Volume.Max)
 
 	station, err := newStation(stationOptions{
 		Player:       mpv,

@@ -13,3 +13,15 @@ channel_number:
 bumpers:
   enabled: true
   duration: 2s
+
+# The remote's volume and mute buttons.
+#
+# control: pi sets the Pi's own volume and leaves the television's alone, so set the television's volume once, by hand, to the loudest anyone should ever hear, and max is a percentage of that. control: tv sends the buttons to the television over HDMI-CEC instead (it needs --cec), and the rest of this section does nothing.
+#
+# The level is never saved. Every power-on starts at start.
+volume:
+  control: pi
+  start: 50
+  max: 70
+  step: 5
+  show: true

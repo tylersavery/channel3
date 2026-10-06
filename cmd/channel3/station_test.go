@@ -38,6 +38,8 @@ type fakePlayer struct {
 	posErr    error
 	loadErr   error
 	texts     []textCall
+	volumes   []int
+	mutes     []bool
 	overlays  []overlayCall
 	removed   []int
 	screen    image.Point
@@ -115,6 +117,34 @@ func (p *fakePlayer) ScreenSize() (int, int, error) {
 		return 1920, 1080, nil
 	}
 	return p.screen.X, p.screen.Y, nil
+}
+
+func (p *fakePlayer) SetVolume(percent int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.volumes = append(p.volumes, percent)
+	return nil
+}
+
+func (p *fakePlayer) SetMute(muted bool) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.mutes = append(p.mutes, muted)
+	return nil
+}
+
+// Volumes returns every SetVolume so far.
+func (p *fakePlayer) Volumes() []int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]int(nil), p.volumes...)
+}
+
+// Mutes returns every SetMute so far.
+func (p *fakePlayer) Mutes() []bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]bool(nil), p.mutes...)
 }
 
 // Overlays returns every ShowOverlay so far.
@@ -923,6 +953,7 @@ func TestTelevisionKeysReachCEC(t *testing.T) {
 		Interval:     time.Hour,
 		Keys:         keys,
 		CEC:          tv,
+		Settings:     tvVolume(),
 	})
 	if err != nil {
 		t.Fatalf("new station: %v", err)
@@ -1043,6 +1074,7 @@ func TestASlowTelevisionDoesNotStallTheBroadcast(t *testing.T) {
 		Interval:     time.Hour,
 		Keys:         keys,
 		CEC:          tv,
+		Settings:     tvVolume(),
 	})
 	if err != nil {
 		t.Fatalf("new station: %v", err)
@@ -1093,6 +1125,7 @@ func TestRepeatedTelevisionKeysCollapse(t *testing.T) {
 		Interval:     time.Hour,
 		Keys:         keys,
 		CEC:          tv,
+		Settings:     tvVolume(),
 	})
 	if err != nil {
 		t.Fatalf("new station: %v", err)
@@ -1858,5 +1891,152 @@ func TestNoScreenSizeShowsNoCard(t *testing.T) {
 	}
 	if overlays := p.Overlays(); len(overlays) != 0 {
 		t.Errorf("showed %v with no screen size", overlays)
+	}
+}
+
+// tvVolume is settings that send the volume buttons to the television, which
+// is what the CEC tests are about.
+func tvVolume() *settings.Settings {
+	look := settings.Default()
+	look.Volume.Control = settings.VolumeOnTV
+	return &look
+}
+
+// lastVolume returns the most recent SetVolume, failing the test if none.
+func lastVolume(t *testing.T, p *fakePlayer) int {
+	t.Helper()
+	volumes := p.Volumes()
+	if len(volumes) == 0 {
+		t.Fatal("the volume was never set")
+	}
+	return volumes[len(volumes)-1]
+}
+
+// TestVolumeStopsAtTheCap is a child holding volume up. The level climbs by
+// the step to the cap and no further, and the bar still shows on every press.
+func TestVolumeStopsAtTheCap(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := newTestStation(t, p, clock, "clips", keyChannels())
+	look := settings.Default().Volume
+
+	s.key(input.Key{Action: input.VolumeUp})
+	if got, want := lastVolume(t, p), look.Start+look.Step; got != want {
+		t.Errorf("one press set %d, want %d", got, want)
+	}
+	for range 20 {
+		s.key(input.Key{Action: input.VolumeUp})
+	}
+	if got := lastVolume(t, p); got != look.Max {
+		t.Errorf("twenty more presses set %d, want the cap %d", got, look.Max)
+	}
+	if got := lastText(t, p); got.Text != "VOL ██████████" {
+		t.Errorf("at the cap the bar reads %q, want it full", got.Text)
+	}
+	if got := len(p.Texts()); got != 21 {
+		t.Errorf("the bar showed %d times for 21 presses, want every press answered", got)
+	}
+}
+
+func TestVolumeStopsAtZero(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := newTestStation(t, p, clock, "clips", keyChannels())
+
+	for range 30 {
+		s.key(input.Key{Action: input.VolumeDown})
+	}
+	if got := lastVolume(t, p); got != 0 {
+		t.Errorf("thirty presses down set %d, want 0", got)
+	}
+	if got := lastText(t, p); got.Text != "VOL ░░░░░░░░░░" {
+		t.Errorf("at zero the bar reads %q, want it empty", got.Text)
+	}
+}
+
+// TestMuteTogglesAndVolumeUnmutes is mute, then volume up, which unmutes the
+// way a television does.
+func TestMuteTogglesAndVolumeUnmutes(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := newTestStation(t, p, clock, "clips", keyChannels())
+
+	s.key(input.Key{Action: input.Mute})
+	if mutes := p.Mutes(); len(mutes) == 0 || !mutes[len(mutes)-1] {
+		t.Fatalf("mute sent %v, want mute on", mutes)
+	}
+	if got := lastText(t, p); got.Text != "MUTE" {
+		t.Errorf("muting showed %q, want MUTE", got.Text)
+	}
+
+	s.key(input.Key{Action: input.VolumeUp})
+	if mutes := p.Mutes(); mutes[len(mutes)-1] {
+		t.Error("volume up left it muted")
+	}
+}
+
+// TestRestartReappliesTheVolume is mpv dying and coming back at its own full
+// volume. The station must put its level back, or the cap is gone.
+func TestRestartReappliesTheVolume(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := newTestStation(t, p, clock, "clips", keyChannels())
+	s.key(input.Key{Action: input.VolumeDown})
+	before := len(p.Volumes())
+
+	s.handle(player.Event{Kind: player.Restarted})
+
+	volumes := p.Volumes()
+	if len(volumes) != before+1 || volumes[len(volumes)-1] != s.volume {
+		t.Errorf("after a restart the volumes set were %v, want the station's %d reapplied", volumes[before:], s.volume)
+	}
+}
+
+func TestStartupSetsTheStartVolume(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	keys := make(chan input.Key)
+	_, stop := runKeyStation(t, p, clock, "clips", keyChannels(), keys, nil)
+	defer stop()
+
+	waitFor(t, func() bool { return len(p.Volumes()) > 0 })
+	if got, want := p.Volumes()[0], settings.Default().Volume.Start; got != want {
+		t.Errorf("startup set the volume to %d, want the start level %d", got, want)
+	}
+}
+
+// TestVolumeOnTheTelevisionLeavesMPVAlone is control: tv. The buttons go to
+// CEC and mpv's volume is never touched, not even at startup.
+func TestVolumeOnTheTelevisionLeavesMPVAlone(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := newTestStation(t, p, clock, "clips", keyChannels())
+	s.settings = *tvVolume()
+
+	s.applyVolume()
+	s.key(input.Key{Action: input.VolumeUp})
+	s.key(input.Key{Action: input.Mute})
+
+	if volumes, mutes := p.Volumes(), p.Mutes(); len(volumes) != 0 || len(mutes) != 0 {
+		t.Errorf("with control: tv the station set volume %v and mute %v, want neither", volumes, mutes)
+	}
+}
+
+func TestVolumeBar(t *testing.T) {
+	cases := []struct {
+		level, ceiling int
+		muted          bool
+		want           string
+	}{
+		{0, 70, false, "VOL ░░░░░░░░░░"},
+		{35, 70, false, "VOL █████░░░░░"},
+		{70, 70, false, "VOL ██████████"},
+		{5, 70, false, "VOL █░░░░░░░░░"},
+		{50, 70, true, "MUTE"},
+	}
+	for _, tc := range cases {
+		if got := volumeBar(tc.level, tc.ceiling, tc.muted); got != tc.want {
+			t.Errorf("volumeBar(%d, %d, %v) = %q, want %q", tc.level, tc.ceiling, tc.muted, got, tc.want)
+		}
 	}
 }

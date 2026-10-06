@@ -558,3 +558,27 @@ func TestScreenSizeReadsOSDDimensions(t *testing.T) {
 		t.Error("a 0x0 screen was not an error")
 	}
 }
+
+func TestSetVolumeAndMuteSetMPVProperties(t *testing.T) {
+	launcher := &fakeLauncher{t: t}
+	sup := startSupervisor(t, launcher, testTimings())
+
+	if err := sup.SetVolume(55); err != nil {
+		t.Fatalf("set volume: %v", err)
+	}
+	if err := sup.SetMute(true); err != nil {
+		t.Fatalf("set mute: %v", err)
+	}
+
+	// Each command waits for mpv's reply, so both have arrived by now.
+	got := launcher.Current().CommandsNamed("set_property")
+	if len(got) != 2 {
+		t.Fatalf("sent %d set_property commands, want 2", len(got))
+	}
+	if got[0][1] != "volume" || got[0][2] != float64(55) {
+		t.Errorf("first set_property was %s, want volume 55", commandStrings(got[0]))
+	}
+	if got[1][1] != "mute" || got[1][2] != true {
+		t.Errorf("second set_property was %s, want mute true", commandStrings(got[1]))
+	}
+}

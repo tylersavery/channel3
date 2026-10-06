@@ -34,7 +34,27 @@ type Settings struct {
 	ChannelNumber Overlay
 	// Bumper is the channel's card shown after a channel change.
 	Bumper Overlay
+	// Volume is how the remote's volume buttons behave.
+	Volume Volume
 }
+
+// Volume control. With Control "pi" the volume and mute buttons set mpv's own
+// volume, capped at Max, and the television's volume is left where it was set
+// by hand: the loudest anyone should ever hear. With "tv" they are passed to the
+// television over CEC and none of the rest applies.
+type Volume struct {
+	Control string // "pi" or "tv"
+	Start   int    // percent at startup; never saved, so every boot starts here
+	Max     int    // percent the up button stops at
+	Step    int    // percent per press
+	Show    bool   // whether a press puts the level on screen
+}
+
+// Volume control modes.
+const (
+	VolumeOnPi = "pi"
+	VolumeOnTV = "tv"
+)
 
 // Overlay is one on-screen piece: whether it is shown, and for how long.
 type Overlay struct {
@@ -47,6 +67,7 @@ func Default() Settings {
 	return Settings{
 		ChannelNumber: Overlay{Enabled: true, Duration: 1500 * time.Millisecond},
 		Bumper:        Overlay{Enabled: true, Duration: 2 * time.Second},
+		Volume:        Volume{Control: VolumeOnPi, Start: 50, Max: 70, Step: 5, Show: true},
 	}
 }
 
@@ -55,6 +76,15 @@ func Default() Settings {
 type file struct {
 	ChannelNumber *overlayFile `yaml:"channel_number"`
 	Bumpers       *overlayFile `yaml:"bumpers"`
+	Volume        *volumeFile  `yaml:"volume"`
+}
+
+type volumeFile struct {
+	Control *string `yaml:"control"`
+	Start   *int    `yaml:"start"`
+	Max     *int    `yaml:"max"`
+	Step    *int    `yaml:"step"`
+	Show    *bool   `yaml:"show"`
 }
 
 type overlayFile struct {
@@ -94,7 +124,47 @@ func Load(root string) (Settings, error) {
 	if err := apply(&s.Bumper, f.Bumpers, "bumpers"); err != nil {
 		return Default(), err
 	}
+	if err := applyVolume(&s.Volume, f.Volume); err != nil {
+		return Default(), err
+	}
 	return s, nil
+}
+
+// applyVolume overlays the volume fields that are present onto v, then checks
+// the result as a whole, since start and max only make sense together.
+func applyVolume(v *Volume, f *volumeFile) error {
+	if f == nil {
+		return nil
+	}
+	if f.Control != nil {
+		v.Control = *f.Control
+	}
+	if f.Start != nil {
+		v.Start = *f.Start
+	}
+	if f.Max != nil {
+		v.Max = *f.Max
+	}
+	if f.Step != nil {
+		v.Step = *f.Step
+	}
+	if f.Show != nil {
+		v.Show = *f.Show
+	}
+
+	if v.Control != VolumeOnPi && v.Control != VolumeOnTV {
+		return fmt.Errorf("%s: volume.control: %q must be %s or %s", FileName, v.Control, VolumeOnPi, VolumeOnTV)
+	}
+	if v.Max < 1 || v.Max > 100 {
+		return fmt.Errorf("%s: volume.max: %d must be between 1 and 100", FileName, v.Max)
+	}
+	if v.Start < 0 || v.Start > v.Max {
+		return fmt.Errorf("%s: volume.start: %d must be between 0 and volume.max, %d", FileName, v.Start, v.Max)
+	}
+	if v.Step < 1 || v.Step > 50 {
+		return fmt.Errorf("%s: volume.step: %d must be between 1 and 50", FileName, v.Step)
+	}
+	return nil
 }
 
 // apply overlays the fields that are present onto o.

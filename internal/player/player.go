@@ -82,6 +82,11 @@ type Player interface {
 	RemoveOverlay(id int) error
 	// ScreenSize reports the size of the output mpv draws on, in pixels.
 	ScreenSize() (width, height int, err error)
+	// SetVolume sets mpv's own volume, in percent of whatever the television
+	// is set to.
+	SetVolume(percent int) error
+	// SetMute mutes or unmutes mpv.
+	SetMute(muted bool) error
 	// Position reports the file mpv is playing and how far into it. An idle
 	// mpv reports an empty path and a zero offset without an error.
 	Position() (string, time.Duration, error)
@@ -363,6 +368,28 @@ func (s *Supervisor) ScreenSize() (int, int, error) {
 		return 0, 0, fmt.Errorf("player: mpv reports a %dx%d screen", dims.W, dims.H)
 	}
 	return dims.W, dims.H, nil
+}
+
+// SetVolume sets mpv's volume property.
+func (s *Supervisor) SetVolume(percent int) error {
+	return s.setProperty("volume", percent)
+}
+
+// SetMute sets mpv's mute property.
+func (s *Supervisor) SetMute(muted bool) error {
+	return s.setProperty("mute", muted)
+}
+
+// setProperty sets one mpv property.
+func (s *Supervisor) setProperty(name string, value any) error {
+	conn, err := s.currentConn()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), s.timings.Command)
+	defer cancel()
+	_, err = conn.Command(ctx, "set_property", name, value)
+	return err
 }
 
 // bgra returns img's pixels in the order mpv's overlay-add calls bgra: blue,
