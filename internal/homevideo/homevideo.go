@@ -289,11 +289,11 @@ func (t Tools) Args(clip Clip, src, dst string) []string {
 //
 // The output is named after when the clip was recorded, for example
 // "2025-06-14 14.03.mp4", which is also its title in the guide; a clip with no
-// recording time keeps its own name. It is written under a temporary name and
+// recording time is named fallback, or after src when fallback is empty. It is written under a temporary name and
 // renamed into place only once ffmpeg has finished, so a channel never sees
 // half a clip. An existing output is never overwritten: a second clip from the
 // same minute gets " 2" and so on.
-func (t Tools) Prepare(ctx context.Context, src, dstDir string) (string, error) {
+func (t Tools) Prepare(ctx context.Context, src, dstDir, fallback string) (string, error) {
 	clip, err := t.Probe(ctx, src)
 	if err != nil {
 		return "", err
@@ -301,7 +301,7 @@ func (t Tools) Prepare(ctx context.Context, src, dstDir string) (string, error) 
 	if err := os.MkdirAll(dstDir, 0o755); err != nil {
 		return "", fmt.Errorf("create %s: %w", dstDir, err)
 	}
-	dst, err := freeName(dstDir, baseName(clip, src))
+	dst, err := freeName(dstDir, baseName(clip, src, fallback))
 	if err != nil {
 		return "", err
 	}
@@ -324,9 +324,12 @@ func (t Tools) Prepare(ctx context.Context, src, dstDir string) (string, error) 
 }
 
 // baseName is the prepared file's name without its extension.
-func baseName(clip Clip, src string) string {
+func baseName(clip Clip, src, fallback string) string {
 	if !clip.Recorded.IsZero() {
 		return clip.Recorded.Format("2006-01-02 15.04")
+	}
+	if fallback != "" {
+		return strings.TrimSuffix(fallback, filepath.Ext(fallback))
 	}
 	return strings.TrimSuffix(filepath.Base(src), filepath.Ext(src))
 }

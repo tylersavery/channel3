@@ -133,7 +133,7 @@ func (h *homeInbox) processAll(ctx context.Context) {
 			return
 		}
 		start := h.now()
-		dst, err := h.tools.Prepare(ctx, src, homeDir(h.root))
+		dst, err := h.tools.Prepare(ctx, src, homeDir(h.root), uploadedName(filepath.Base(src)))
 		if err != nil {
 			if ctx.Err() != nil {
 				return // Shutting down; the clip is still in the inbox for next time.
@@ -161,6 +161,15 @@ func (h *homeInbox) processAll(ctx context.Context) {
 		return
 	}
 	h.rescan()
+}
+
+// arrivalStamp is the prefix Accept puts on a stored upload.
+var arrivalStamp = regexp.MustCompile(`^\d{8}-\d{6}\.\d{3} `)
+
+// uploadedName is the name the phone sent, without the arrival time Accept
+// added, which is what a clip with no recording date is named after.
+func uploadedName(stored string) string {
+	return arrivalStamp.ReplaceAllString(stored, "")
 }
 
 // waiting lists the finished uploads in arrival order.

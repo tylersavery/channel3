@@ -101,6 +101,21 @@ The `--rsync-path` is what makes the copied files land owned by `channel3` rathe
 
 Video you put under `<root>/local/` yourself and reference by a relative path such as `local/steam-engines.mp4` travels the same way: rsync `~/srv/channel3/local/` alongside the library and the sidecars resolve against `/srv/channel3` on the Pi, so there is nothing to ingest again there.
 
+## 7b. Home videos
+
+Phone clips go on a channel whose sources name the folder `local/home`, such as a Home Movies channel. They reach it two ways.
+
+From the Mac or any machine, in a batch: copy the clips into a folder on the Pi and convert them, two encoder threads so the broadcast keeps playing, then run `make pi-ingest` to put them on air.
+
+```
+scp *.MOV channel3.local:/tmp/clips/
+ssh channel3.local "sudo -u channel3 nice -n 19 /usr/local/bin/channel3 prepare --root /srv/channel3 --threads 2 /tmp/clips"
+```
+
+From a phone, one at a time, with uploads turned on: add `CHANNEL3_UPLOAD_PIN=` and a PIN as a line of its own in `/etc/default/channel3` and restart the service. An iOS Shortcut that shares a video to `POST http://channel3.local/api/upload`, with the PIN in an `X-Upload-PIN` header, the file name in `X-Filename` and the video as the request body, does the rest: the clip is converted in the background at low priority and is on the channel a few minutes later, with no restart.
+
+`prepare` converts each clip to 1080p H.264 in standard dynamic range with the phone's rotation applied, fills a portrait clip's sides with the slowly drifting colour of its edges, names it after when it was recorded, and keeps the original in `local/home-originals`. A clip that will not convert is set aside in `local/home-failed`.
+
 ## 8. Logs
 
 ```

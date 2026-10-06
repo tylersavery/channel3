@@ -18,6 +18,7 @@ import (
 
 	"github.com/tylersavery/channel3/internal/api"
 	"github.com/tylersavery/channel3/internal/bumper"
+	"github.com/tylersavery/channel3/internal/homevideo"
 	"github.com/tylersavery/channel3/internal/input"
 	"github.com/tylersavery/channel3/internal/library"
 	"github.com/tylersavery/channel3/internal/player"
@@ -70,6 +71,8 @@ func runServe(g *globals, args []string) error {
 	noInput := fs.Bool("no-input", false, "do not read any keys, so the channel cannot be changed")
 	useCEC := fs.Bool("cec", false, "send power and volume keys to the television over HDMI-CEC")
 	cecDevice := fs.String("cec-device", "/dev/cec0", "CEC device cec-ctl talks to")
+	uploadPIN := fs.String("upload-pin", os.Getenv("CHANNEL3_UPLOAD_PIN"),
+		"PIN a phone must send to upload a home video (default $CHANNEL3_UPLOAD_PIN; empty turns uploads off)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -93,6 +96,7 @@ func runServe(g *globals, args []string) error {
 		NoInput:      *noInput,
 		CEC:          *useCEC,
 		CECDevice:    *cecDevice,
+		UploadPIN:    *uploadPIN,
 	}); err != nil {
 		return &exitError{code: 1, err: err}
 	}
@@ -118,6 +122,8 @@ type serveOptions struct {
 	CEC bool
 	// CECDevice is the CEC character device cec-ctl is pointed at.
 	CECDevice string
+	// UploadPIN turns on home video uploads. Empty leaves them off.
+	UploadPIN string
 }
 
 // serve broadcasts until the context is cancelled.
@@ -156,6 +162,25 @@ func serve(ctx context.Context, root string, opts serveOptions) error {
 	// The listener goes up before mpv. An appliance whose television is dark
 	// because mpv will not start is exactly when someone reaches for their
 	// phone, and the guide answering is how they find out the service is alive.
+	// Home video uploads exist only with a PIN. The inbox worker prepares
+	// clips at low priority beside the broadcast and asks whichever station is
+	// running to rescan once they are in the library.
+	var uploads api.Uploads
+	if opts.UploadPIN != "" {
+		inbox := newHomeInbox(root,
+			homevideo.Tools{FFmpeg: "ffmpeg", FFprobe: "ffprobe", Threads: 2, Nice: true},
+			func() error { return ingestLocal(root) },
+			func() {
+				if s := current.Load(); s != nil {
+					s.RequestRescan()
+				}
+			},
+			slog.Default())
+		go inbox.Run(ctx)
+		uploads = inbox
+		slog.Info("home video uploads are on", "inbox", homeInboxDir(root))
+	}
+
 	stopHTTP, err := startHTTP(opts.Listen, api.Deps{
 		Channels: func() []schedule.Channel {
 			if s := current.Load(); s != nil {
@@ -173,8 +198,10 @@ func serve(ctx context.Context, root string, opts serveOptions) error {
 			}
 			return ""
 		},
-		Clock: clock,
-		UI:    ui,
+		Clock:     clock,
+		UI:        ui,
+		Uploads:   uploads,
+		UploadPIN: opts.UploadPIN,
 	})
 	if err != nil {
 		return err

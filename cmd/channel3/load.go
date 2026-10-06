@@ -2,6 +2,7 @@ package main
 
 import (
 	"cmp"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -90,4 +91,26 @@ func loadCards(root string) map[string]bumper.Card {
 		cards[ch.ID] = card
 	}
 	return cards
+}
+
+// ingestLocal makes sidecars for local files and folders only, which serve runs
+// after a home video upload. It never touches the network, so it is allowed
+// while serve is broadcasting.
+func ingestLocal(root string) error {
+	channels, err := library.LoadChannels(library.ChannelsDir(root))
+	if err != nil {
+		return err
+	}
+	report, err := library.Ingest(library.IngestOptions{
+		Root:      root,
+		Channels:  channels,
+		Prober:    library.FFProbe{Path: "ffprobe"},
+		LocalOnly: true,
+		Out:       io.Discard,
+	})
+	if err != nil {
+		return err
+	}
+	slog.Info("local files ingested", "new", report.OK, "already in", report.Skipped, "failed", report.Failed)
+	return nil
 }

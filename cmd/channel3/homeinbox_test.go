@@ -130,3 +130,12 @@ func TestRunRemovesUnfinishedUploads(t *testing.T) {
 		t.Error("an unfinished upload survived the worker starting")
 	}
 }
+
+func TestUploadedNameDropsTheArrivalStamp(t *testing.T) {
+	if got := uploadedName("20261006-090012.908 IMG_9999.MOV"); got != "IMG_9999.MOV" {
+		t.Errorf("uploadedName = %q, want the name the phone sent", got)
+	}
+	if got := uploadedName("IMG_9999.MOV"); got != "IMG_9999.MOV" {
+		t.Errorf("uploadedName left %q, want an unstamped name unchanged", got)
+	}
+}

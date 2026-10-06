@@ -66,7 +66,7 @@ func runPrepare(g *globals, args []string) error {
 		if ctx.Err() != nil {
 			return &exitError{code: 1, err: errors.New("interrupted; the clips already prepared are kept")}
 		}
-		dst, err := tools.Prepare(ctx, src, out)
+		dst, err := tools.Prepare(ctx, src, out, "")
 		if err != nil {
 			failed++
 			fmt.Printf("failed %d/%d %s: %v\n", i+1, len(clips), filepath.Base(src), err)

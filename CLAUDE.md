@@ -32,6 +32,7 @@ Broadcast TV appliance for kids on a Raspberry Pi. Themed channels of approved v
 - Ingest is the only code that touches the network. Playback reads local files only.
 - Real channel config and the media library live outside the repo (`/srv/channel3` on the Pi, `~/srv/channel3` on the Mac). The repo carries `channels/example.yaml` only. The framework may go open source; content never does.
 - Broadcast mode has no pause and no seek. Movie mode (later) is the only place controls exist. On-screen chrome is kept to what the owner approves, case by case: today that is the channel number for a moment after a change. Anything more (a channel bumper, say) is asked for first, never added on initiative.
+- The guide API is read only, with one exception: `POST /api/upload` hands a home video to the Home Movies inbox. It exists only when serve has an upload PIN (`CHANNEL3_UPLOAD_PIN` in `/etc/default/channel3`, never in the repo) and changes nothing about what plays. Nothing else may write.
 - Tests alongside code. The schedule package is table-tested; the player is tested against a fake IPC socket.
 
 ## Layout (planned)
