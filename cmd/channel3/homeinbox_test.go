@@ -139,3 +139,16 @@ func TestUploadedNameDropsTheArrivalStamp(t *testing.T) {
 		t.Errorf("uploadedName left %q, want an unstamped name unchanged", got)
 	}
 }
+
+// TestAcceptNamesWithoutAnExtension is the name an iOS Shortcut offers first:
+// IMG_1234 with no .MOV.
+func TestAcceptNamesWithoutAnExtension(t *testing.T) {
+	h, _, _ := testInbox(t, homevideo.Tools{})
+	stored, err := h.Accept("IMG_1234", strings.NewReader("video bytes"))
+	if err != nil {
+		t.Fatalf("Accept: %v", err)
+	}
+	if !strings.HasSuffix(stored, "IMG_1234.mov") {
+		t.Errorf("stored as %q, want it given a .mov extension", stored)
+	}
+}

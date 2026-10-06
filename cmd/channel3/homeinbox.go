@@ -61,6 +61,11 @@ var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._ -]+`)
 // whole, so the worker never picks up half an upload.
 func (h *homeInbox) Accept(name string, body io.Reader) (string, error) {
 	clean := strings.TrimSpace(unsafeName.ReplaceAllString(filepath.Base(name), "_"))
+	if clean != "" && filepath.Ext(clean) == "" {
+		// An iOS Shortcut's handiest name for a video is IMG_1234, without
+		// the extension. ffmpeg reads the real format from the file itself.
+		clean += ".mov"
+	}
 	if clean == "" || clean == "." || clean == ".." || !homevideo.IsVideo(clean) {
 		return "", fmt.Errorf("%q is not a video file", name)
 	}
