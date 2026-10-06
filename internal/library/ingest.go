@@ -196,7 +196,7 @@ func checkLocalSlugs(root string, channels []Channel) error {
 	var problems []error
 	for _, ch := range channels {
 		claimedBy := make(map[string]string)
-		for _, source := range ch.Sources {
+		for _, source := range expandFolders(root, ch.Sources) {
 			if !isLocalSource(source.URL) {
 				continue
 			}
@@ -223,7 +223,7 @@ func checkLocalSlugs(root string, channels []Channel) error {
 // ingestChannel walks one channel's sources in config order.
 func (r *ingestRun) ingestChannel(ch Channel) error {
 	dir := ChannelDir(r.root, ch.ID)
-	for _, source := range ch.Sources {
+	for _, source := range expandFolders(r.root, ch.Sources) {
 		var err error
 		if isLocalSource(source.URL) {
 			err = r.ingestLocal(ch, dir, source)
@@ -235,6 +235,54 @@ func (r *ingestRun) ingestChannel(ch Channel) error {
 		}
 	}
 	return nil
+}
+
+// folderVideoExts are the files a folder source picks up.
+var folderVideoExts = map[string]bool{".mp4": true, ".m4v": true, ".mov": true, ".mkv": true}
+
+// expandFolders replaces each local source that names a directory with one
+// source per video file in it, in name order.
+//
+// A folder source is how a channel grows without its config changing: the Home
+// Movies channel names local/home once, and every clip prepared into that
+// folder becomes an item at the next ingest. Each file is titled with its name
+// exactly as it is, since prepared clips are named for when they were recorded.
+// The folder's own title, if it has one, is not used. A folder that cannot be
+// read is passed through unchanged, so ingestLocal reports it the usual way.
+func expandFolders(root string, sources []Source) []Source {
+	out := make([]Source, 0, len(sources))
+	for _, source := range sources {
+		if !isLocalSource(source.URL) {
+			out = append(out, source)
+			continue
+		}
+		path, err := localPath(root, source.URL)
+		if err != nil {
+			out = append(out, source)
+			continue
+		}
+		info, err := os.Stat(path)
+		if err != nil || !info.IsDir() {
+			out = append(out, source)
+			continue
+		}
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			out = append(out, source)
+			continue
+		}
+		for _, e := range entries {
+			name := e.Name()
+			if e.IsDir() || strings.HasPrefix(name, ".") || !folderVideoExts[strings.ToLower(filepath.Ext(name))] {
+				continue
+			}
+			out = append(out, Source{
+				URL:   strings.TrimSuffix(source.URL, "/") + "/" + name,
+				Title: strings.TrimSuffix(name, filepath.Ext(name)),
+			})
+		}
+	}
+	return out
 }
 
 // ingestRemote expands one URL and ingests everything it names.

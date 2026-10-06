@@ -1616,3 +1616,46 @@ func copyTree(t *testing.T, from, to string) {
 		t.Fatalf("copy %s to %s: %v", from, to, err)
 	}
 }
+
+// TestIngestFolderSourceTakesEveryVideoInIt is the Home Movies channel: one
+// source naming a folder, and every clip prepared into it becomes an item
+// titled with its file name, while hidden files, other files and subfolders are
+// left alone.
+func TestIngestFolderSourceTakesEveryVideoInIt(t *testing.T) {
+	captureLogs(t)
+	f := newIngestFixture(t)
+	home := filepath.Join(f.root, "local", "home")
+	if err := os.MkdirAll(filepath.Join(home, "originals"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"2025-06-14 14.03.mp4", "2025-06-14 14.03 2.mp4", "Beach.mov", ".hidden.mp4", "notes.txt", "half.mp4.part"} {
+		copyTinyMP4(t, filepath.Join(home, name))
+	}
+
+	report, err := f.run(trainsChannel("local/home"))
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if report != (Report{OK: 3}) {
+		t.Errorf("report = %+v, want the three videos ok", report)
+	}
+	for id, title := range map[string]string{
+		"2025-06-14-14-03":   "2025-06-14 14.03",
+		"2025-06-14-14-03-2": "2025-06-14 14.03 2",
+		"beach":              "Beach",
+	} {
+		if got := f.sidecar(t, "trains", id); got.Title != title {
+			t.Errorf("%s titled %q, want %q", id, got.Title, title)
+		}
+	}
+
+	// A clip added later is picked up by the next run and the rest are kept.
+	copyTinyMP4(t, filepath.Join(home, "2025-07-01 09.15.mp4"))
+	report, err = f.run(trainsChannel("local/home"))
+	if err != nil {
+		t.Fatalf("second Ingest: %v", err)
+	}
+	if report.OK != 1 || report.Skipped != 3 {
+		t.Errorf("second run report = %+v, want the new clip ok and three skipped", report)
+	}
+}
