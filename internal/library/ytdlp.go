@@ -149,6 +149,7 @@ func downloadArgs(source, destDir, format string) []string {
 	return []string{
 		ignoreConfigFlag,
 		"--format", format,
+		"--concurrent-fragments", concurrentFragments,
 		"--merge-output-format", "mp4",
 		"--no-playlist",
 		"--no-overwrites",
@@ -159,6 +160,14 @@ func downloadArgs(source, destDir, format string) []string {
 		"--", source,
 	}
 }
+
+// concurrentFragments is how many pieces of one video yt-dlp downloads at once.
+//
+// YouTube caps each connection at a few megabytes a second whatever the line
+// can carry, so one 1080p60 hour took ten minutes on the Pi's gigabit Ethernet.
+// Four connections move the same file several times faster. Playback never
+// sees this; it only shortens how long an ingest keeps the television dark.
+const concurrentFragments = "4"
 
 // ignoreConfigFlag keeps yt-dlp's own configuration files out of the run.
 //

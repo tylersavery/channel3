@@ -422,3 +422,13 @@ func TestDefaultFormatCapsAt1080pH264(t *testing.T) {
 		}
 	}
 }
+
+// TestDownloadUsesConcurrentFragments keeps the parallel download that gets
+// past YouTube's per-connection cap.
+func TestDownloadUsesConcurrentFragments(t *testing.T) {
+	args := downloadArgs("u", "d", DefaultFormat)
+	i := slices.Index(args, "--concurrent-fragments")
+	if i < 0 || i+1 >= len(args) || args[i+1] != concurrentFragments {
+		t.Errorf("download args %v do not ask for %s concurrent fragments", args, concurrentFragments)
+	}
+}
