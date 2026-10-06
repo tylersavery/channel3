@@ -41,6 +41,7 @@ func loadStation(root string) ([]schedule.Channel, error) {
 			scheduled = append(scheduled, schedule.Item{
 				ID:       item.ID,
 				Title:    item.Title,
+				Artist:   item.Artist,
 				Path:     item.Path,
 				Duration: item.Duration,
 			})

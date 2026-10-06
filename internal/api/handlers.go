@@ -51,6 +51,7 @@ type channelsResponse struct {
 type airingJSON struct {
 	ID       string  `json:"id"`
 	Title    string  `json:"title"`
+	Artist   string  `json:"artist,omitempty"`
 	Start    string  `json:"start"`
 	End      string  `json:"end"`
 	Duration float64 `json:"duration"`
@@ -62,6 +63,7 @@ type airingJSON struct {
 type slotJSON struct {
 	ID       string  `json:"id"`
 	Title    string  `json:"title"`
+	Artist   string  `json:"artist,omitempty"`
 	Start    string  `json:"start"`
 	End      string  `json:"end"`
 	Duration float64 `json:"duration"`
@@ -166,6 +168,7 @@ func (s *server) handleGuide(w http.ResponseWriter, r *http.Request) {
 			entry.Slots = append(entry.Slots, slotJSON{
 				ID:       slot.Item.ID,
 				Title:    slot.Item.Title,
+				Artist:   slot.Item.Artist,
 				Start:    s.stamp(slot.Start),
 				End:      s.stamp(slot.End),
 				Duration: seconds(slot.Item.Duration),
@@ -207,6 +210,7 @@ func (s *server) airing(slot schedule.Slot) *airingJSON {
 	return &airingJSON{
 		ID:       slot.Item.ID,
 		Title:    slot.Item.Title,
+		Artist:   slot.Item.Artist,
 		Start:    s.stamp(slot.Start),
 		End:      s.stamp(slot.End),
 		Duration: seconds(slot.Item.Duration),

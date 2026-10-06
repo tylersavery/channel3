@@ -251,8 +251,17 @@ func (r *ingestRun) ingestChannel(ch Channel) error {
 	return nil
 }
 
-// folderVideoExts are the files a folder source picks up.
-var folderVideoExts = map[string]bool{".mp4": true, ".m4v": true, ".mov": true, ".mkv": true}
+// folderVideoExts and audioExts are the files a folder source picks up: video
+// for Home Movies, music for the radio stations.
+var (
+	folderVideoExts = map[string]bool{".mp4": true, ".m4v": true, ".mov": true, ".mkv": true}
+	audioExts       = map[string]bool{".mp3": true, ".m4a": true, ".aac": true, ".flac": true, ".ogg": true, ".opus": true, ".wav": true}
+)
+
+// isAudio reports whether path is a music file.
+func isAudio(path string) bool {
+	return audioExts[strings.ToLower(filepath.Ext(path))]
+}
 
 // expandFolders replaces each local source that names a directory with one
 // source per video file in it, in name order.
@@ -287,12 +296,14 @@ func expandFolders(root string, sources []Source) []Source {
 		}
 		for _, e := range entries {
 			name := e.Name()
-			if e.IsDir() || strings.HasPrefix(name, ".") || !folderVideoExts[strings.ToLower(filepath.Ext(name))] {
+			ext := strings.ToLower(filepath.Ext(name))
+			if e.IsDir() || strings.HasPrefix(name, ".") || !(folderVideoExts[ext] || audioExts[ext]) {
 				continue
 			}
 			out = append(out, Source{
-				URL:   strings.TrimSuffix(source.URL, "/") + "/" + name,
-				Title: strings.TrimSuffix(name, filepath.Ext(name)),
+				URL:        strings.TrimSuffix(source.URL, "/") + "/" + name,
+				Title:      strings.TrimSuffix(name, filepath.Ext(name)),
+				fromFolder: true,
 			})
 		}
 	}
@@ -465,6 +476,11 @@ func (r *ingestRun) ingestLocal(ch Channel, dir string, source Source) error {
 	title := cmp.Or(source.Title, defaultLocalTitle(path))
 
 	if existing, done := r.alreadyIngested(dir, id); done {
+		if source.fromFolder {
+			// A folder item's title came from its tags or its file name the
+			// first time, and the file name is no reason to change it.
+			title = ""
+		}
 		return r.keepOrRetitle(ch, dir, existing, title)
 	}
 	if r.dryRun {
@@ -487,9 +503,21 @@ func (r *ingestRun) ingestLocal(ch Channel, dir string, source Source) error {
 	if err != nil {
 		return r.fail(ch, dir, id, source.URL, err)
 	}
+	var artist string
+	if tagger, ok := r.prober.(Tagger); ok && isAudio(path) {
+		tags, err := tagger.Tags(path)
+		if err != nil {
+			slog.Warn("could not read a song's tags, titling it by its file name", "path", path, "error", err)
+		}
+		if tags.Title != "" && (source.fromFolder || source.Title == "") {
+			title = tags.Title
+		}
+		artist = tags.Artist
+	}
 	return r.writeOK(ch, dir, Sidecar{
 		ID:       id,
 		Title:    title,
+		Artist:   artist,
 		Source:   source.URL,
 		File:     r.sidecarFile(dir, path),
 		Duration: duration,

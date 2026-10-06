@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -633,5 +634,26 @@ func TestAMissingAssetIs404(t *testing.T) {
 	decode(t, rec, &body)
 	if body.Error == "" {
 		t.Error("the 404 carries no error message")
+	}
+}
+
+// TestSongsCarryTheirArtist is a radio station in the guide: a song's artist
+// is in now, next and the guide's slots, and video has no artist key at all.
+func TestSongsCarryTheirArtist(t *testing.T) {
+	deps := testDeps()
+	deps.Channels = func() []schedule.Channel {
+		return []schedule.Channel{{
+			ID: "beatles", Number: 21, Name: "The Beatles",
+			Items: []schedule.Item{{ID: "help", Title: "Help!", Artist: "The Beatles", Path: "/r/help.mp3", Duration: 2*time.Minute + 18*time.Second}},
+		}}
+	}
+	for _, target := range []string{"/api/now", "/api/guide?hours=1"} {
+		body := get(t, deps, target).Body.String()
+		if !strings.Contains(body, `"artist":"The Beatles"`) {
+			t.Errorf("%s does not carry the artist: %s", target, body)
+		}
+	}
+	if body := get(t, testDeps(), "/api/now").Body.String(); strings.Contains(body, `"artist"`) {
+		t.Errorf("video items carry an artist key: %s", body)
 	}
 }

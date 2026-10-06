@@ -2,6 +2,7 @@
 
 import type { GuideChannel, GuideResponse, NowChannel, NowResponse } from './api'
 import {
+  itemLabel,
   advanceOffset,
   formatClock,
   laterSlots,
@@ -90,7 +91,7 @@ function ChannelRow({
         <p className="channel__standby">Please Stand By</p>
       ) : (
         <NowAiring
-          title={now.title}
+          title={itemLabel(now)}
           offset={advanceOffset(now.offset, now.duration, elapsedSeconds)}
           duration={now.duration}
         />
@@ -99,7 +100,7 @@ function ChannelRow({
       {next === null ? null : (
         <p className="channel__next">
           <span className="channel__nextlabel">Next</span>
-          <span className="channel__nexttitle">{next.title}</span>
+          <span className="channel__nexttitle">{itemLabel(next)}</span>
           <span className="channel__nexttime">at {formatClock(next.start)}</span>
         </p>
       )}
@@ -189,7 +190,7 @@ function Later({ channel, guide, guideLoaded, after }: LaterProps) {
                 className="later__slot"
               >
                 <span className="later__time">{formatClock(slot.start)}</span>
-                <span className="later__title">{slot.title}</span>
+                <span className="later__title">{itemLabel(slot)}</span>
               </li>
             ))}
           </ol>

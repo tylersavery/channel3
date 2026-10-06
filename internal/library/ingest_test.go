@@ -123,6 +123,12 @@ type fakeProber struct {
 	// err fails every call.
 	err   error
 	calls []string
+	// tags are the songs' tags by path.
+	tags map[string]Tags
+}
+
+func (p *fakeProber) Tags(path string) (Tags, error) {
+	return p.tags[path], nil
 }
 
 func (p *fakeProber) DurationSeconds(path string) (float64, error) {
@@ -1755,5 +1761,59 @@ func TestIngestedSingleVideoIsNotLookedUpAgain(t *testing.T) {
 	}
 	if report.OK != 1 || report.Skipped != 1 {
 		t.Errorf("report = %+v, want the retitle ok and the playlist item skipped", report)
+	}
+}
+
+func TestParseTags(t *testing.T) {
+	got, err := parseTags([]byte(`{"format":{"tags":{"TITLE":"Baby Beluga","album_artist":"Raffi"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != (Tags{Title: "Baby Beluga", Artist: "Raffi"}) {
+		t.Errorf("tags = %+v, want the title in any case and the album artist as a fallback", got)
+	}
+	got, err = parseTags([]byte(`{"format":{"tags":{"title":"Help!","artist":"The Beatles","album_artist":"Various"}}}`))
+	if err != nil || got.Artist != "The Beatles" {
+		t.Errorf("tags = %+v, %v, want the artist ahead of the album artist", got, err)
+	}
+}
+
+// TestIngestFolderOfSongsUsesTheirTags is a radio station: a folder of music.
+// A tagged song is titled and credited from its tags, an untagged one keeps
+// its file name, and a second run leaves both titles alone.
+func TestIngestFolderOfSongsUsesTheirTags(t *testing.T) {
+	captureLogs(t)
+	f := newIngestFixture(t)
+	dir := filepath.Join(f.root, "local", "radio", "beatles")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tagged := filepath.Join(dir, "01 track.mp3")
+	untagged := filepath.Join(dir, "Here Comes the Sun.m4a")
+	for _, p := range []string{tagged, untagged} {
+		copyTinyMP4(t, p)
+	}
+	f.prober.tags = map[string]Tags{tagged: {Title: "Help!", Artist: "The Beatles"}}
+
+	if _, err := f.run(trainsChannel("local/radio/beatles")); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	song := f.sidecar(t, "trains", "01-track")
+	if song.Title != "Help!" || song.Artist != "The Beatles" {
+		t.Errorf("tagged song = %q by %q, want Help! by The Beatles", song.Title, song.Artist)
+	}
+	if got := f.sidecar(t, "trains", "here-comes-the-sun"); got.Title != "Here Comes the Sun" || got.Artist != "" {
+		t.Errorf("untagged song = %q by %q, want its file name and no artist", got.Title, got.Artist)
+	}
+
+	report, err := f.run(trainsChannel("local/radio/beatles"))
+	if err != nil {
+		t.Fatalf("second Ingest: %v", err)
+	}
+	if report.Skipped != 2 || report.OK != 0 {
+		t.Errorf("second run = %+v, want both skipped and nothing retitled", report)
+	}
+	if got := f.sidecar(t, "trains", "01-track").Title; got != "Help!" {
+		t.Errorf("the second run retitled the song %q", got)
 	}
 }

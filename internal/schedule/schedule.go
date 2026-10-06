@@ -20,8 +20,11 @@ import "time"
 
 // Item is one playable video, as the schedule sees it.
 type Item struct {
-	ID       string
-	Title    string
+	ID    string
+	Title string
+	// Artist is a song's artist, which is also what marks an item as a song
+	// on screen. Empty for video.
+	Artist   string
 	Path     string
 	Duration time.Duration
 }

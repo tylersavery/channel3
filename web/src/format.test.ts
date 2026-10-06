@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { GuideSlot, NowResponse } from './api'
 import {
+  itemLabel,
   advancedISO,
   advanceOffset,
   formatClock,
@@ -172,5 +173,14 @@ describe('the fixture captured from the running station', () => {
     expect(progressFraction(airing.offset, airing.duration)).toBeCloseTo(0.242, 3)
     expect(progressFraction(airing.offset, span)).toBeGreaterThan(0.7)
     expect(remainingLabel(airing.offset, airing.duration)).toBe('18 min left')
+  })
+})
+
+describe('itemLabel', () => {
+  it('is the title alone for video', () => {
+    expect(itemLabel({ title: 'Little Bear: Hiccups' })).toBe('Little Bear: Hiccups')
+  })
+  it('adds the artist for a song', () => {
+    expect(itemLabel({ title: 'Help!', artist: 'The Beatles' })).toBe('Help! · The Beatles')
   })
 })

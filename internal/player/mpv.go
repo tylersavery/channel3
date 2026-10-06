@@ -73,6 +73,8 @@ func BaseArgs(socket string) []string {
 		"--keep-open=no",
 		"--hr-seek=yes",
 		"--image-display-duration=inf",
+		// A song plays to a black screen, never to its embedded cover art.
+		"--audio-display=no",
 		"--input-ipc-server=" + socket,
 	}
 }

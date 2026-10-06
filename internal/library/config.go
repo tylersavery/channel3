@@ -79,6 +79,11 @@ func IconsDir(root string) string {
 type Source struct {
 	URL   string
 	Title string
+	// fromFolder marks a source expandFolders made from one file in a folder
+	// source. Its title is the file's name, a default rather than a choice, so
+	// a song's own tags win over it and a later run never rewrites a title
+	// with it.
+	fromFolder bool
 }
 
 // sourceMapping is the mapping form of a source in YAML.

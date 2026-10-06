@@ -7,6 +7,8 @@
 export interface Airing {
   id: string
   title: string
+  /** A song's artist. Absent for video. */
+  artist?: string
   /** RFC 3339 with the station's local offset. */
   start: string
   /** RFC 3339. Cut at the 04:00 rollover, so this is not start plus duration. */
@@ -21,6 +23,8 @@ export interface Airing {
 export interface GuideSlot {
   id: string
   title: string
+  /** A song's artist. Absent for video. */
+  artist?: string
   start: string
   end: string
   duration: number

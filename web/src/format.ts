@@ -17,6 +17,14 @@ const clockWithSecondsFormat = new Intl.DateTimeFormat(undefined, {
 })
 
 /**
+ * The line a guide shows for an item: the title, and for a song its artist
+ * after a middle dot.
+ */
+export function itemLabel(item: { title: string; artist?: string }): string {
+  return item.artist ? `${item.title} · ${item.artist}` : item.title
+}
+
+/**
  * Renders an RFC 3339 instant as a wall clock time in the viewer's zone.
  *
  * The station sends its own offset, so a phone in another zone sees its own

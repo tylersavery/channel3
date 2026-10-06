@@ -41,6 +41,7 @@ const (
 type Sidecar struct {
 	ID          string     `json:"id"`
 	Title       string     `json:"title,omitempty"`
+	Artist      string     `json:"artist,omitempty"`
 	Source      string     `json:"source"`
 	File        string     `json:"file,omitempty"`
 	Duration    float64    `json:"duration,omitempty"`

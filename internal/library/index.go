@@ -17,6 +17,7 @@ import (
 type Item struct {
 	ID       string
 	Title    string
+	Artist   string // a song's artist; empty for video
 	Path     string // absolute path to the video file
 	Duration time.Duration
 	Source   string
@@ -154,6 +155,7 @@ func itemFromSidecar(absRoot, channelID, dir string, s Sidecar) (Item, bool) {
 	return Item{
 		ID:       s.ID,
 		Title:    s.Title,
+		Artist:   s.Artist,
 		Path:     path,
 		Duration: durationFromSeconds(s.Duration),
 		Source:   s.Source,
