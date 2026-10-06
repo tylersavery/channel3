@@ -73,7 +73,8 @@ type Player interface {
 	Standby() error
 	// ShowText draws text over the picture for d, replacing any text already
 	// up. It survives a Load, so it can be sent at the moment of tuning.
-	ShowText(text string, d time.Duration) error
+	// scale is a percentage of the configured OSD size; 100 is full size.
+	ShowText(text string, d time.Duration, scale int) error
 	// ShowOverlay puts img over the picture with its top left corner at x, y in
 	// screen pixels, replacing whatever overlay already has id. It survives a
 	// Load, like ShowText.
@@ -285,20 +286,38 @@ func (s *Supervisor) Standby() error {
 	return s.loadFile(s.standby, "loadfile", s.standby, "replace")
 }
 
-// ShowText draws text over the picture for d.
+// ShowText draws text over the picture for d, at scale percent of the OSD's
+// configured size.
 //
 // mpv runs with osd-level=0 so that none of its own messages ever appear. The
 // last argument to show-text is the level a message needs, and 0 is what lets
 // this one through.
-func (s *Supervisor) ShowText(text string, d time.Duration) error {
+//
+// Full size sends the text as it is. Any other size turns on mpv's ASS
+// override tags for this one message, which mpv only reads when the command
+// asks for property expansion, so the text is passed with $, { and \ escaped
+// rather than ever being read as a property or a tag.
+func (s *Supervisor) ShowText(text string, d time.Duration, scale int) error {
 	conn, err := s.currentConn()
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), s.timings.Command)
 	defer cancel()
-	_, err = conn.Command(ctx, "show-text", text, d.Milliseconds(), 0)
+	if scale <= 0 || scale == 100 {
+		_, err = conn.Command(ctx, "show-text", text, d.Milliseconds(), 0)
+		return err
+	}
+	styled := fmt.Sprintf("${osd-ass-cc/0}{\\fscx%d\\fscy%d}%s", scale, scale, escapeOSD(text))
+	_, err = conn.Command(ctx, "expand-properties", "show-text", styled, d.Milliseconds(), 0)
 	return err
+}
+
+// escapeOSD keeps text literal inside an expanded, ASS enabled show-text: $$
+// is a literal dollar to property expansion, and \{ and \\ are a literal brace
+// and backslash to ASS.
+func escapeOSD(text string) string {
+	return strings.NewReplacer("$", "$$", "\\", "\\\\", "{", "\\{").Replace(text)
 }
 
 // ShowOverlay puts img over the picture at x, y.

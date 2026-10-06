@@ -58,6 +58,7 @@ type overlayCall struct {
 type textCall struct {
 	Text     string
 	Duration time.Duration
+	Scale    int
 }
 
 // newFakePlayer returns a player that records what it is asked to do.
@@ -86,10 +87,10 @@ func (p *fakePlayer) Standby() error {
 	return nil
 }
 
-func (p *fakePlayer) ShowText(text string, d time.Duration) error {
+func (p *fakePlayer) ShowText(text string, d time.Duration, scale int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.texts = append(p.texts, textCall{Text: text, Duration: d})
+	p.texts = append(p.texts, textCall{Text: text, Duration: d, Scale: scale})
 	return nil
 }
 
@@ -2092,5 +2093,23 @@ func TestRescanStartsAnEmptyChannelPlaying(t *testing.T) {
 
 	if got := p.LastLoad(t).Path; got != "/home/first.mp4" {
 		t.Errorf("after the rescan the screen loaded %q, want the new clip", got)
+	}
+}
+
+// TestVolumeBarIsHalfTheNumbersSize keeps the two pieces of text their own
+// sizes: the channel number full, the volume bar half.
+func TestVolumeBarIsHalfTheNumbersSize(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	s := newTestStation(t, p, clock, "clips", keyChannels())
+	s.play()
+
+	s.key(input.Key{Action: input.ChannelUp})
+	if got := lastText(t, p).Scale; got != 100 {
+		t.Errorf("the channel number is at %d%%, want 100", got)
+	}
+	s.key(input.Key{Action: input.VolumeUp})
+	if got := lastText(t, p).Scale; got != 50 {
+		t.Errorf("the volume bar is at %d%%, want 50", got)
 	}
 }

@@ -110,7 +110,7 @@ func TestShowTextSendsLevelZero(t *testing.T) {
 	launcher := &fakeLauncher{t: t}
 	sup := startSupervisor(t, launcher, testTimings())
 
-	if err := sup.ShowText("12", 1500*time.Millisecond); err != nil {
+	if err := sup.ShowText("12", 1500*time.Millisecond, 100); err != nil {
 		t.Fatalf("show text: %v", err)
 	}
 
@@ -580,5 +580,25 @@ func TestSetVolumeAndMuteSetMPVProperties(t *testing.T) {
 	}
 	if got[1][1] != "mute" || got[1][2] != true {
 		t.Errorf("second set_property was %s, want mute true", commandStrings(got[1]))
+	}
+}
+
+// TestScaledTextUsesExpandedASS is the half size volume bar: a scale other than
+// 100 asks mpv to expand the message and turns on ASS for it alone, with the
+// text escaped so it can never be read as a property or a tag.
+func TestScaledTextUsesExpandedASS(t *testing.T) {
+	launcher := &fakeLauncher{t: t}
+	sup := startSupervisor(t, launcher, testTimings())
+
+	if err := sup.ShowText("VOL ██ $x {y}", time.Second, 50); err != nil {
+		t.Fatalf("show text: %v", err)
+	}
+	got := waitForCommand(t, launcher.Current(), "expand-properties")
+	if len(got) != 5 || got[1] != "show-text" {
+		t.Fatalf("sent %s, want expand-properties show-text with text, duration and level", commandStrings(got))
+	}
+	want := `${osd-ass-cc/0}{\fscx50\fscy50}VOL ██ $$x \{y}`
+	if text, _ := got[2].(string); text != want {
+		t.Errorf("styled text %q, want %q", text, want)
 	}
 }

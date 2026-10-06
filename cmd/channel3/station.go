@@ -444,6 +444,14 @@ func (s *station) key(k input.Key) {
 // volumeShown is how long the volume bar stays up after a press.
 const volumeShown = 1500 * time.Millisecond
 
+// Sizes of the on-screen text, as a percentage of the OSD's configured size.
+// The channel number is the full retro size; the volume bar, which is up far
+// more often and is wider, is half that.
+const (
+	numberScale = 100
+	volumeScale = 50
+)
+
 // volumeCells is how many cells the volume bar has. A full bar is the cap.
 const volumeCells = 10
 
@@ -467,7 +475,7 @@ func (s *station) adjustVolume(k input.Key) {
 	s.log.Info("volume", "percent", s.volume, "max", v.Max, "muted", s.muted)
 	s.applyVolume()
 	if v.Show {
-		s.showText(volumeBar(s.volume, v.Max, s.muted), volumeShown)
+		s.showText(volumeBar(s.volume, v.Max, s.muted), volumeShown, volumeScale)
 	}
 }
 
@@ -507,7 +515,7 @@ func (s *station) showTyping() {
 	if waiting == "" || !s.settings.ChannelNumber.Enabled {
 		return
 	}
-	s.showText(waiting+"-", deadline.Sub(s.now()))
+	s.showText(waiting+"-", deadline.Sub(s.now()), numberScale)
 }
 
 // showNumber puts a channel number up, if the settings show one.
@@ -515,16 +523,16 @@ func (s *station) showNumber(number string) {
 	if !s.settings.ChannelNumber.Enabled {
 		return
 	}
-	s.showText(number, s.settings.ChannelNumber.Duration)
+	s.showText(number, s.settings.ChannelNumber.Duration, numberScale)
 }
 
 // showText puts text over the picture. A failure costs the viewer a number on
 // screen and nothing else, so it is logged and the broadcast goes on.
-func (s *station) showText(text string, d time.Duration) {
+func (s *station) showText(text string, d time.Duration, scale int) {
 	if d <= 0 {
 		return
 	}
-	if err := s.player.ShowText(text, d); err != nil {
+	if err := s.player.ShowText(text, d, scale); err != nil {
 		s.log.Warn("could not show text on screen", "text", text, "error", err)
 	}
 }
