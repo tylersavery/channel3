@@ -9,7 +9,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "TZ=America/Toronto vitest run"
+    "test": "TZ=America/Toronto LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 vitest run"
   },
   "dependencies": {
     "react": "^19.2.8",
