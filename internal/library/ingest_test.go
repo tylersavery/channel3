@@ -3,6 +3,7 @@ package library
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1657,5 +1658,36 @@ func TestIngestFolderSourceTakesEveryVideoInIt(t *testing.T) {
 	}
 	if report.OK != 1 || report.Skipped != 3 {
 		t.Errorf("second run report = %+v, want the new clip ok and three skipped", report)
+	}
+}
+
+// TestLocalOnlyIngestRunsBesideABroadcast is what serve does after a home video
+// upload: a channel with a folder and a URL source, a live pid file, and no
+// runner. The folder is ingested, the URL is left alone, and the pid guard does
+// not stop it.
+func TestLocalOnlyIngestRunsBesideABroadcast(t *testing.T) {
+	captureLogs(t)
+	f := newIngestFixture(t)
+	home := filepath.Join(f.root, "local", "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	copyTinyMP4(t, filepath.Join(home, "2025-06-14 14.03.mp4"))
+	if err := os.WriteFile(PIDFile(f.root), []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := Ingest(IngestOptions{
+		Root:      f.root,
+		Channels:  trainsChannel("local/home", "https://example.com/never-fetched"),
+		Prober:    f.prober,
+		LocalOnly: true,
+		Out:       io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if report != (Report{OK: 1}) {
+		t.Errorf("report = %+v, want the one clip ok and the URL untouched", report)
 	}
 }

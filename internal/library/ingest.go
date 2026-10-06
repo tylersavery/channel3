@@ -37,6 +37,12 @@ type IngestOptions struct {
 	Out io.Writer
 	// Now supplies sidecar timestamps. Nil means time.Now.
 	Now func() time.Time
+	// LocalOnly ingests local files and folders only and leaves every URL
+	// source alone, so it needs no runner and touches no network. It is what
+	// serve runs after a home video upload, and it is allowed while serve is
+	// broadcasting: probing a file or two does not compete with playback the
+	// way a download does.
+	LocalOnly bool
 }
 
 // Report counts what one run did. An item is in exactly one of these.
@@ -82,14 +88,16 @@ func Ingest(opts IngestOptions) (Report, error) {
 
 // ingestRun is the state of one run of Ingest.
 type ingestRun struct {
-	root     string
-	channels []Channel
-	runner   Runner
-	prober   Prober
-	dryRun   bool
-	out      io.Writer
-	now      func() time.Time
-	report   Report
+	// localOnly skips every URL source; see IngestOptions.LocalOnly.
+	localOnly bool
+	root      string
+	channels  []Channel
+	runner    Runner
+	prober    Prober
+	dryRun    bool
+	out       io.Writer
+	now       func() time.Time
+	report    Report
 }
 
 // newIngestRun validates the options and everything that can be checked before a
@@ -98,7 +106,7 @@ func newIngestRun(opts IngestOptions) (*ingestRun, error) {
 	if strings.TrimSpace(opts.Root) == "" {
 		return nil, errors.New("ingest: no root given")
 	}
-	if opts.Runner == nil {
+	if opts.Runner == nil && !opts.LocalOnly {
 		return nil, errors.New("ingest: no runner given")
 	}
 	if opts.Prober == nil && !opts.DryRun {
@@ -117,18 +125,21 @@ func newIngestRun(opts IngestOptions) (*ingestRun, error) {
 	if err := checkLocalSlugs(root, channels); err != nil {
 		return nil, err
 	}
-	if err := checkNotBroadcasting(root); err != nil {
-		return nil, err
+	if !opts.LocalOnly {
+		if err := checkNotBroadcasting(root); err != nil {
+			return nil, err
+		}
 	}
 
 	run := &ingestRun{
-		root:     root,
-		channels: channels,
-		runner:   opts.Runner,
-		prober:   opts.Prober,
-		dryRun:   opts.DryRun,
-		out:      opts.Out,
-		now:      opts.Now,
+		localOnly: opts.LocalOnly,
+		root:      root,
+		channels:  channels,
+		runner:    opts.Runner,
+		prober:    opts.Prober,
+		dryRun:    opts.DryRun,
+		out:       opts.Out,
+		now:       opts.Now,
 	}
 	if run.out == nil {
 		run.out = os.Stdout
@@ -225,9 +236,12 @@ func (r *ingestRun) ingestChannel(ch Channel) error {
 	dir := ChannelDir(r.root, ch.ID)
 	for _, source := range expandFolders(r.root, ch.Sources) {
 		var err error
-		if isLocalSource(source.URL) {
+		switch {
+		case isLocalSource(source.URL):
 			err = r.ingestLocal(ch, dir, source)
-		} else {
+		case r.localOnly:
+			continue
+		default:
 			err = r.ingestRemote(ch, dir, source)
 		}
 		if err != nil {
