@@ -4,7 +4,9 @@
 // Nothing here changes what plays. There is no endpoint that tunes, pauses or
 // seeks, by design: the television is driven by the remote and by the clock,
 // and a phone on the home network is only ever allowed to look. The handlers
-// read the same pure schedule the broadcast loop reads.
+// read the same pure schedule the broadcast loop reads. The one exception is
+// /api/upload, which hands a home video to the Home Movies inbox when the box
+// has an upload PIN and the request carries it.
 //
 // They do not see everything the loop sees. An item the loop has excluded
 // because mpv could not open it is still in the schedule these handlers
@@ -45,6 +47,10 @@ type Deps struct {
 	// UI is the built web interface. A nil FS, or one with no index.html,
 	// serves the fallback page instead.
 	UI fs.FS
+	// Uploads receives home video clips, and UploadPIN is what a request has
+	// to carry to send one. With either unset there is no upload endpoint.
+	Uploads   Uploads
+	UploadPIN string
 }
 
 // server holds the dependencies with their defaults applied.
@@ -75,6 +81,9 @@ func New(deps Deps) http.Handler {
 	mux.Handle("/api/guide", readOnly(http.HandlerFunc(s.handleGuide)))
 	// Anything else under /api/ is a client asking for an endpoint that does
 	// not exist, and it wants that as JSON rather than as the UI's index page.
+	// The one endpoint that is not read only. It changes nothing about what
+	// plays; it hands a clip to the Home Movies inbox, and only with the PIN.
+	mux.Handle("/api/upload", http.HandlerFunc(s.handleUpload))
 	mux.Handle("/api/", readOnly(http.HandlerFunc(handleUnknownAPI)))
 	mux.Handle("/", readOnly(s.ui()))
 	return mux
