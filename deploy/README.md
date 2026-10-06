@@ -116,6 +116,12 @@ From a phone, one at a time, with uploads turned on: add `CHANNEL3_UPLOAD_PIN=` 
 
 `prepare` converts each clip to 1080p H.264 in standard dynamic range with the phone's rotation applied, fills a portrait clip's sides with the slowly drifting colour of its edges, names it after when it was recorded, and keeps the original in `local/home-originals`. A clip that will not convert is set aside in `local/home-failed`.
 
+## 7c. Radio stations
+
+A radio station is a channel whose source is a folder of music, such as `local/radio/beatles`. Songs play to a black screen, with the title and artist shown as each starts and before it ends.
+
+To add songs, drop MP3s (or m4a, flac and the like) into `~/srv/channel3/radio/<station>/` on the Mac and run `make pi-ingest`. The songs are moved to `/srv/channel3/local/radio/<station>/` on the Pi: each is removed from the Mac only after rsync has transferred and checked it, so the Mac's folders empty themselves and the Pi holds the master copy. Title and artist come from the songs' tags, so tag them before dropping them in; an untagged song is titled by its file name.
+
 ## 8. Logs
 
 ```

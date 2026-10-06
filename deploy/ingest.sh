@@ -20,6 +20,12 @@
 # icons directory beside it, which holds the channels' bumper icons, is mirrored
 # like the channel files, .svg files only.
 #
+# Music is different, because the Mac is short of space: the radio directory
+# beside the channel configs, one folder per station, is a drop zone. Each song
+# in it is moved to /srv/channel3/local/radio on the Pi, and only removed from
+# the Mac once rsync has transferred and checked it, so the Pi holds the master
+# copy of the music and the Mac's folders empty themselves.
+#
 # Ingesting on the Mac into ~/srv/channel3 and rsyncing the library to the Pi is
 # the no-downtime route.
 #
@@ -107,6 +113,21 @@ if [ -d "$local_icons" ]; then
 	rsync -rt --delete --itemize-changes --include='*.svg' --exclude='*' \
 		--rsync-path="sudo -u channel3 rsync" \
 		"$local_icons/" "$PI_HOST:$REMOTE_ROOT/icons/"
+fi
+
+local_radio="$(dirname "$LOCAL_CHANNELS")/radio"
+if [ -d "$local_radio" ]; then
+	printf '==> moving music from %s\n' "$local_radio"
+	# shellcheck disable=SC2029  # local constant, expanded here on purpose
+	ssh "$PI_HOST" "sudo -u channel3 mkdir -p $REMOTE_ROOT/local/radio"
+	rsync -rt --remove-source-files --itemize-changes \
+		--include='*/' \
+		--include='*.[mM][pP]3' --include='*.[mM]4[aA]' --include='*.[aA][aA][cC]' \
+		--include='*.[fF][lL][aA][cC]' --include='*.[oO][gG][gG]' --include='*.[oO][pP][uU][sS]' \
+		--include='*.[wW][aA][vV]' \
+		--exclude='*' \
+		--rsync-path="sudo -u channel3 rsync" \
+		"$local_radio/" "$PI_HOST:$REMOTE_ROOT/local/radio/"
 fi
 
 local_settings="$(dirname "$LOCAL_CHANNELS")/settings.yaml"
