@@ -2147,8 +2147,8 @@ func TestSongTitleShowsAtTheStartAndTheEnd(t *testing.T) {
 
 	s.showTrackDue()
 	got := lastText(t, p)
-	if got.Text != "Help!\nThe Beatles" || got.Scale != 50 || got.Duration != 8*time.Second {
-		t.Errorf("opening title = %+v, want Help! over The Beatles at half size for 8s", got)
+	if got.Text != "Help!\nThe Beatles" || got.Scale != 30 || got.Duration != 8*time.Second {
+		t.Errorf("opening title = %+v, want Help! over The Beatles at 30%% size for 8s", got)
 	}
 
 	wantEnd := start.Add(3*time.Minute - offset - 8*time.Second)

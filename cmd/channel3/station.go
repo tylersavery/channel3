@@ -463,11 +463,12 @@ const volumeShown = 1500 * time.Millisecond
 
 // Sizes of the on-screen text, as a percentage of the OSD's configured size.
 // The channel number is the full retro size; the volume bar, which is up far
-// more often and is wider, is half that.
+// more often and is wider, is half that; a song's title, two lines that may be
+// long, is smaller still.
 const (
 	numberScale = 100
 	volumeScale = 50
-	trackScale  = 50
+	trackScale  = 30
 )
 
 // volumeCells is how many cells the volume bar has. A full bar is the cap.
