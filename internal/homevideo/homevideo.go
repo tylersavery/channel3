@@ -75,6 +75,9 @@ type Tools struct {
 	// Threads caps ffmpeg's encoder threads. Zero lets ffmpeg decide, which is
 	// right for a batch with nothing else running and wrong beside playback.
 	Threads int
+	// Nice runs ffmpeg at the lowest scheduling priority, so a conversion in
+	// the background yields the CPU to mpv decoding the broadcast.
+	Nice bool
 }
 
 // Probe reads the facts Prepare needs from path.
@@ -303,7 +306,11 @@ func (t Tools) Prepare(ctx context.Context, src, dstDir string) (string, error) 
 		return "", err
 	}
 	tmp := dst + ".part"
-	cmd := exec.CommandContext(ctx, t.FFmpeg, t.Args(clip, src, tmp)...)
+	name, args := t.FFmpeg, t.Args(clip, src, tmp)
+	if t.Nice {
+		name, args = "nice", append([]string{"-n", "19", t.FFmpeg}, args...)
+	}
+	cmd := exec.CommandContext(ctx, name, args...)
 	proc.Harden(cmd)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		os.Remove(tmp)

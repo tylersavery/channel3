@@ -213,3 +213,23 @@ func TestPrepareRealClips(t *testing.T) {
 		})
 	}
 }
+
+// TestPrepareAtLowPriority is the background path serve takes: two threads and
+// nice, which must still produce the same clip.
+func TestPrepareAtLowPriority(t *testing.T) {
+	tl := tools(t)
+	if _, err := exec.LookPath("nice"); err != nil {
+		t.Skip("nice is not installed")
+	}
+	tl.Threads, tl.Nice = 2, true
+	src := makeClip(t, tl, "portrait.mp4",
+		"-f", "lavfi", "-i", "testsrc2=size=360x640:rate=30:duration=1",
+		"-c:v", "libx264", "-pix_fmt", "yuv420p")
+	out, err := tl.Prepare(context.Background(), src, t.TempDir())
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if clip, err := tl.Probe(context.Background(), out); err != nil || clip.Width != 1920 {
+		t.Errorf("low priority prepare gave %+v, %v", clip, err)
+	}
+}
