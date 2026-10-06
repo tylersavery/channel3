@@ -35,7 +35,14 @@ func loadStation(root string) ([]schedule.Channel, error) {
 
 	station := make([]schedule.Channel, 0, len(channels))
 	for _, ch := range channels {
-		items := index.Items(ch.ID)
+		itemsFrom := ch.ID
+		if ch.Guide != nil {
+			// The guide plays its music channel's songs behind it, so it
+			// borrows that channel's items. It shuffles them with its own
+			// seed, so the guide is not a copy of the station it borrows from.
+			itemsFrom = ch.Guide.Music
+		}
+		items := index.Items(itemsFrom)
 		scheduled := make([]schedule.Item, 0, len(items))
 		for _, item := range items {
 			scheduled = append(scheduled, schedule.Item{
@@ -47,12 +54,16 @@ func loadStation(root string) ([]schedule.Channel, error) {
 				Duration: item.Duration,
 			})
 		}
-		station = append(station, schedule.Channel{
+		sc := schedule.Channel{
 			ID:     ch.ID,
 			Number: ch.Number,
 			Name:   ch.Name,
 			Items:  scheduled,
-		})
+		}
+		if ch.Guide != nil {
+			sc.Guide, sc.GuideMusic = true, ch.Guide.Music
+		}
+		station = append(station, sc)
 	}
 
 	slices.SortStableFunc(station, func(a, b schedule.Channel) int {

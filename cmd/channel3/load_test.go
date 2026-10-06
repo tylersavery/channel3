@@ -87,3 +87,26 @@ func TestPrepareCommandFillsHomeAndKeepsOriginals(t *testing.T) {
 		t.Errorf("a file that is not a video was touched: %v", err)
 	}
 }
+
+// TestGuideBorrowsItsMusicChannelsItems is the guide's background music: the
+// guide channel carries the music channel's songs as its own items.
+func TestGuideBorrowsItsMusicChannelsItems(t *testing.T) {
+	root := t.TempDir()
+	writeRootFile(t, root, "channels/classical.yaml", "id: radio-classical\nnumber: 23\nname: Classical\nsources: []\n")
+	writeRootFile(t, root, "channels/guide.yaml", "id: guide\nnumber: 1\nname: Guide\nguide:\n  music: radio-classical\n")
+	writeRootFile(t, root, "library/radio-classical/nocturne.json",
+		`{"id":"nocturne","title":"Nocturne","artist":"Chopin","source":"local/radio/classical/n.mp3","file":"../../local/n.mp3","duration":270,"status":"ok"}`)
+	writeRootFile(t, root, "local/n.mp3", "song")
+
+	station, err := loadStation(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guide := station[0]
+	if !guide.Guide || guide.GuideMusic != "radio-classical" || guide.Number != 1 {
+		t.Fatalf("first channel = %+v, want the guide on 1", guide)
+	}
+	if len(guide.Items) != 1 || guide.Items[0].Title != "Nocturne" {
+		t.Errorf("the guide's items are %+v, want the classical station's song", guide.Items)
+	}
+}

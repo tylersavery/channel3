@@ -42,6 +42,16 @@ type Channel struct {
 	// Bumper is the card shown after tuning to the channel. Nil means the
 	// channel has none.
 	Bumper *Bumper
+	// Guide makes the channel the on-screen guide rather than a channel of
+	// its own videos. Nil for every other channel.
+	Guide *Guide
+}
+
+// Guide is a guide channel's settings.
+type Guide struct {
+	// Music is the id of the channel whose songs play behind the guide, or
+	// "" for a silent guide.
+	Music string
 }
 
 // Bumper is a channel's card: its colour and, optionally, an icon.
@@ -146,10 +156,11 @@ type channelFile struct {
 	Name    string    `yaml:"name"`
 	Sources []Source  `yaml:"sources"`
 	Bumper  yaml.Node `yaml:"bumper"`
+	Guide   yaml.Node `yaml:"guide"`
 }
 
 // configFields are the only keys a channel config file may contain.
-var configFields = []string{"id", "number", "name", "sources", "bumper"}
+var configFields = []string{"id", "number", "name", "sources", "bumper", "guide"}
 
 // idPattern is the accepted channel id. It doubles as a directory name under
 // <root>/library, which is why it stays this narrow.
@@ -325,9 +336,46 @@ func readChannelFile(path, name string) (Channel, uniqueness, []error) {
 
 	bumper, bumperErrs := readBumper(raw.Bumper, name)
 	errs = append(errs, bumperErrs...)
+	guide, guideErr := readGuide(raw.Guide, name)
+	if guideErr != nil {
+		errs = append(errs, guideErr)
+	}
+	if guide != nil && len(raw.Sources) > 0 {
+		errs = append(errs, &ConfigError{File: name, Field: "sources", Msg: "a guide channel shows the guide, so it has no sources of its own"})
+	}
 
-	ch := Channel{ID: raw.ID, Number: raw.Number, Name: raw.Name, Sources: raw.Sources, Bumper: bumper}
+	ch := Channel{ID: raw.ID, Number: raw.Number, Name: raw.Name, Sources: raw.Sources, Bumper: bumper, Guide: guide}
 	return ch, uniqueness{id: idValid, number: numberValid}, errs
+}
+
+// readGuide validates a guide block: a mapping with at most a music channel id.
+// An absent block is an ordinary channel; an empty one is a silent guide.
+func readGuide(node yaml.Node, file string) (*Guide, error) {
+	if node.Kind == 0 {
+		return nil, nil
+	}
+	if node.Kind == yaml.ScalarNode && node.Tag == "!!null" {
+		return &Guide{}, nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return nil, &ConfigError{File: file, Field: "guide", Msg: "must be a mapping, such as music: radio-classical"}
+	}
+	var keys map[string]yaml.Node
+	if err := node.Decode(&keys); err != nil {
+		return nil, &ConfigError{File: file, Field: "guide", Msg: err.Error()}
+	}
+	for key := range keys {
+		if key != "music" {
+			return nil, &ConfigError{File: file, Field: "guide." + key, Msg: "unknown field, expected music"}
+		}
+	}
+	var raw struct {
+		Music string `yaml:"music"`
+	}
+	if err := node.Decode(&raw); err != nil {
+		return nil, &ConfigError{File: file, Field: "guide", Msg: err.Error()}
+	}
+	return &Guide{Music: strings.TrimSpace(raw.Music)}, nil
 }
 
 // readBumper validates a channel's bumper block. An absent block is no bumper

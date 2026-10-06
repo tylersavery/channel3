@@ -455,3 +455,38 @@ func TestLoadChannelsBumper(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadChannelsGuide(t *testing.T) {
+	captureLogs(t)
+	cases := []struct {
+		name, body string
+		want       *Guide
+		wantErr    string
+	}{
+		{"ordinary channel", "id: farm\nnumber: 3\nname: FarmTV\nsources: []\n", nil, ""},
+		{"guide with music", "id: guide\nnumber: 1\nname: Guide\nguide:\n  music: radio-classical\n", &Guide{Music: "radio-classical"}, ""},
+		{"silent guide", "id: guide\nnumber: 1\nname: Guide\nguide:\n", &Guide{}, ""},
+		{"guide with sources", "id: guide\nnumber: 1\nname: Guide\nguide:\n  music: x\nsources:\n  - local/a.mp4\n", nil, "no sources of its own"},
+		{"unknown guide field", "id: guide\nnumber: 1\nname: Guide\nguide:\n  musik: x\n", nil, "guide.musik"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeConfig(t, dir, "c.yaml", tc.body)
+			channels, err := LoadChannels(dir)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("error = %v, want one mentioning %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LoadChannels: %v", err)
+			}
+			got := channels[0].Guide
+			if (got == nil) != (tc.want == nil) || (got != nil && *got != *tc.want) {
+				t.Errorf("guide = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}

@@ -38,6 +38,11 @@ type Channel struct {
 	Number int
 	Name   string
 	Items  []Item
+	// Guide marks the on-screen guide channel. Its items are the songs that
+	// play behind the guide, borrowed from GuideMusic, the channel they come
+	// from, which the guide lists as one of its own rows.
+	Guide      bool
+	GuideMusic string
 }
 
 // Slot is one airing of one item.
