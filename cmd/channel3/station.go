@@ -70,6 +70,10 @@ type station struct {
 	renderedFor image.Point
 	// bumperUntil is when the card on screen comes down; zero when none is up.
 	bumperUntil time.Time
+	// rescans asks the loop to reread the library now, outside the 04:00
+	// rollover. It holds one request: several arriving together are one
+	// rescan.
+	rescans chan struct{}
 	// volume and muted are mpv's level and mute, when the remote's volume
 	// buttons are the Pi's. Held in memory only: every start is at
 	// settings.Volume.Start.
@@ -183,6 +187,7 @@ func newStation(opts stationOptions) (*station, error) {
 		keys:         opts.Keys,
 		cec:          opts.CEC,
 		controls:     make(chan input.Key, 1),
+		rescans:      make(chan struct{}, 1),
 		digitTimeout: opts.DigitTimeout,
 		excluded:     make(map[string]map[string]bool),
 		settings:     settings.Default(),
@@ -399,6 +404,8 @@ func (s *station) run(ctx context.Context) error {
 			s.expireDigits()
 		case <-card.C:
 			s.hideBumper()
+		case <-s.rescans:
+			s.rescan()
 		case <-ticker.C:
 			s.reconcile()
 		}
@@ -1064,6 +1071,44 @@ func (s *station) rollover(day time.Time) {
 		s.retune()
 	}
 	s.play()
+}
+
+// RequestRescan asks the broadcast loop to reread the library as soon as it
+// can. It is safe to call from any goroutine and never blocks.
+func (s *station) RequestRescan() {
+	select {
+	case s.rescans <- struct{}{}:
+	default:
+		// A rescan is already waiting, and it will see this change too.
+	}
+}
+
+// rescan rereads the library outside the 04:00 rollover, which is how a home
+// video uploaded during the day reaches the air.
+//
+// Unlike the rollover it keeps today's exclusions and the broadcast day, and
+// it finishes with a reconcile rather than a reload: if what is on screen is
+// still what the schedule wants, nothing is reloaded and the viewer sees no
+// change. Only a channel whose schedule the new items changed is reloaded.
+func (s *station) rescan() {
+	channels, err := s.reload()
+	if err != nil {
+		s.log.Error("could not rescan the library, keeping the channels already loaded", "error", err)
+		return
+	}
+	if len(channels) == 0 {
+		s.log.Error("the rescan found no channels, keeping the channels already loaded")
+		return
+	}
+	s.log.Info("library rescanned", "channels", len(channels))
+	s.setChannels(channels)
+	s.refreshCards()
+	if _, ok := s.channel(s.tuned); ok {
+		s.retune()
+	} else if err := s.tune(""); err != nil {
+		s.log.Error("could not tune a channel after the rescan", "error", err)
+	}
+	s.reconcile()
 }
 
 // channel returns the tuned channel by id.

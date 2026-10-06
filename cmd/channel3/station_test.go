@@ -2040,3 +2040,57 @@ func TestVolumeBar(t *testing.T) {
 		}
 	}
 }
+
+// TestRescanAddsItemsWithoutDisturbingTheScreen is a home video uploaded while
+// another channel is on. The new item appears in the station's channels, and
+// the channel on screen, whose schedule did not change, is not reloaded.
+func TestRescanAddsItemsWithoutDisturbingTheScreen(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	channels := keyChannels()
+	s := newTestStation(t, p, clock, "clips", channels)
+	s.play()
+	loads := len(p.Loads())
+
+	home := schedule.Channel{ID: "home", Number: 14, Name: "Home Movies",
+		Items: []schedule.Item{{ID: "first", Title: "2025-06-14 14.03", Path: "/home/first.mp4", Duration: time.Minute}}}
+	s.reload = func() ([]schedule.Channel, error) { return append(keyChannels(), home), nil }
+	s.RequestRescan()
+	s.RequestRescan()
+	<-s.rescans
+	s.rescan()
+
+	if _, ok := s.channel("home"); !ok {
+		t.Fatal("the rescan did not pick up the new channel")
+	}
+	if got := len(p.Loads()); got != loads {
+		t.Errorf("the rescan reloaded the screen %d times, want none for an unchanged channel", got-loads)
+	}
+	select {
+	case <-s.rescans:
+		t.Error("two requests left two rescans queued, want them folded into one")
+	default:
+	}
+}
+
+// TestRescanStartsAnEmptyChannelPlaying is the first upload landing on an
+// empty Home Movies channel that is on screen showing the card.
+func TestRescanStartsAnEmptyChannelPlaying(t *testing.T) {
+	p := newFakePlayer()
+	clock := &fakeClock{now: noon()}
+	empty := schedule.Channel{ID: "home", Number: 14, Name: "Home Movies"}
+	s := newTestStation(t, p, clock, "home", append(keyChannels(), empty))
+	s.play()
+	if len(p.Loads()) != 0 {
+		t.Fatalf("an empty channel loaded %v", p.Loads())
+	}
+
+	full := empty
+	full.Items = []schedule.Item{{ID: "first", Title: "2025-06-14 14.03", Path: "/home/first.mp4", Duration: time.Minute}}
+	s.reload = func() ([]schedule.Channel, error) { return append(keyChannels(), full), nil }
+	s.rescan()
+
+	if got := p.LastLoad(t).Path; got != "/home/first.mp4" {
+		t.Errorf("after the rescan the screen loaded %q, want the new clip", got)
+	}
+}
