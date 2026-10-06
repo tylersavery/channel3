@@ -1,6 +1,6 @@
 // Command channel3 is the Channel Three broadcast appliance.
 //
-// It dispatches to one of three subcommands: serve, ingest and guide.
+// It dispatches to one of four subcommands: serve, ingest, guide and prepare.
 // Each subcommand lives in its own file and owns its own flags, so this file is
 // settled: a later phase adds flags to its own subcommand file, never here.
 package main
@@ -49,6 +49,7 @@ func commands() []command {
 		{"serve", "run the broadcast service", runServe},
 		{"ingest", "download the configured sources into the library", runIngest},
 		{"guide", "print the schedule as text", runGuide},
+		{"prepare", "convert phone clips for the Home Movies channel", runPrepare},
 	}
 }
 
