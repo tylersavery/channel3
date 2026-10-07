@@ -75,9 +75,50 @@ func TestLoadSendsTheFourArgumentLoadfile(t *testing.T) {
 	}
 
 	got := waitForCommand(t, launcher.Current(), "loadfile")
-	want := `["loadfile","/lib/a.mp4","replace",-1,"start=83.500"]`
+	want := `["loadfile","/lib/a.mp4","replace",-1,"start=83.500,pause=no,sid=auto,aid=auto"]`
 	if commandStrings(got) != want {
 		t.Errorf("mpv got %s, want %s", commandStrings(got), want)
+	}
+}
+
+// TestLoadMovieChoosesTracks checks a movie's tracks and deinterlacing go to
+// mpv with the load, for that file alone.
+func TestLoadMovieChoosesTracks(t *testing.T) {
+	launcher := &fakeLauncher{t: t}
+	sup := startSupervisor(t, launcher, testTimings())
+
+	if err := sup.LoadMovie("/movies/Up.mkv", 90*time.Second, MovieOptions{Audio: 2, Subtitle: 0, Deinterlace: true}); err != nil {
+		t.Fatalf("load movie: %v", err)
+	}
+	got := waitForCommand(t, launcher.Current(), "loadfile")
+	want := `["loadfile","/movies/Up.mkv","replace",-1,"start=90.000,pause=no,aid=2,sid=no,deinterlace=yes"]`
+	if commandStrings(got) != want {
+		t.Errorf("mpv got %s, want %s", commandStrings(got), want)
+	}
+}
+
+// TestMovieControls checks pause, seek and track switching reach mpv.
+func TestMovieControls(t *testing.T) {
+	launcher := &fakeLauncher{t: t}
+	sup := startSupervisor(t, launcher, testTimings())
+
+	steps := []struct {
+		do   func() error
+		name string
+		want string
+	}{
+		{func() error { return sup.SetPause(true) }, "set_property", `["set_property","pause",true]`},
+		{func() error { return sup.Seek(-10 * time.Second) }, "seek", `["seek",-10,"relative"]`},
+		{func() error { return sup.SetTrack(SubtitleTrack, 0) }, "set_property", `["set_property","sid","no"]`},
+		{func() error { return sup.SetTrack(AudioTrack, 3) }, "set_property", `["set_property","aid","3"]`},
+	}
+	for _, step := range steps {
+		if err := step.do(); err != nil {
+			t.Fatalf("%s: %v", step.want, err)
+		}
+		if got := commandStrings(waitForCommand(t, launcher.Current(), step.name)); got != step.want {
+			t.Errorf("mpv got %s, want %s", got, step.want)
+		}
 	}
 }
 
@@ -398,7 +439,7 @@ func TestLoadRejectsANegativeOffset(t *testing.T) {
 	if len(got) == 5 {
 		start, _ = got[4].(string)
 	}
-	if start != "start=0.000" {
+	if start != "start=0.000,pause=no,sid=auto,aid=auto" {
 		t.Errorf("mpv got %s, want a zero start", commandStrings(got))
 	}
 }

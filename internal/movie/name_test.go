@@ -35,3 +35,22 @@ func TestNameString(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestTrackLabel(t *testing.T) {
+	tests := []struct {
+		track Track
+		want  string
+	}{
+		{Track{Language: "eng", Channels: 6}, "English · 5.1"},
+		{Track{Language: "eng", Title: "Director's Commentary", Channels: 2}, "English · Director's Commentary"},
+		{Track{Language: "fre"}, "French"},
+		{Track{Language: "en", Title: "English"}, "English"},
+		{Track{}, "Unknown"},
+		{Track{Language: "swe"}, "swe"},
+	}
+	for _, tt := range tests {
+		if got := tt.track.Label(); got != tt.want {
+			t.Errorf("%+v: got %q, want %q", tt.track, got, tt.want)
+		}
+	}
+}

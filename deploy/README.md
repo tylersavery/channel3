@@ -135,6 +135,21 @@ The files are moved to `/srv/channel3/movies-inbox/` on the Pi, removed from the
 
 Once a movie is ready the rip is deleted from the Pi; the Mac's copy is the original. A rip that will not prepare is set aside in `/srv/channel3/movies-failed/`, and the log says why (`journalctl -u channel3 | grep -i movie`). A restart in the middle of a re-encode starts that film again next time.
 
+To watch: press 0 on the remote, then the code, which is the upload PIN (`CHANNEL3_UPLOAD_PIN`); without one Movie Mode is off. The menu shows the movies in title order, numbered; press a number to play, Ch up and down for the next page, 0 to go back to TV. A movie stopped partway asks "1 Resume, 2 Start over". While a movie plays:
+
+| Key | Does |
+|---|---|
+| 5 | Pause and play |
+| 4 / 6 | Back / forward 10 s |
+| 1 / 3 | Back / forward 1 min |
+| 7 / 9 | Back / forward 5 min |
+| 8 | Next subtitles, then off (off still shows forced English subtitles for foreign-language scenes) |
+| 2 | Next audio track |
+| 0 | Stop and back to the menu |
+| Ch up / down | Nothing |
+
+The channel carries on by the clock the whole time, so leaving Movie Mode lands wherever it has got to. Where each movie was stopped is kept in `/srv/channel3/movie-positions.json`, written every 30 s while it plays; a movie watched to the end is forgotten. The menu closes by itself after ten idle minutes.
+
 To try a rip on the Mac first: `bin/channel3 prepare-movie --root ~/srv/channel3 path/to/rip.mkv`, which writes to `~/srv/channel3/local/movies/` and leaves the rip alone.
 
 ## 8. Logs

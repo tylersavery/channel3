@@ -265,6 +265,12 @@ func serve(ctx context.Context, root string, opts serveOptions) error {
 		"bumpers", look.Bumper.Enabled, "bumper for", look.Bumper.Duration,
 		"volume on", look.Volume.Control, "volume start", look.Volume.Start, "volume max", look.Volume.Max)
 
+	// Movie Mode shares the upload PIN, so without one it is off and
+	// channel 0 is only a number.
+	var shelf *movieShelf
+	if opts.UploadPIN != "" {
+		shelf = newMovieShelf(root, opts.UploadPIN)
+	}
 	station, err := newStation(stationOptions{
 		Player:       mpv,
 		Clock:        clock,
@@ -276,6 +282,7 @@ func serve(ctx context.Context, root string, opts serveOptions) error {
 		CEC:          tv,
 		Settings:     &look,
 		Cards:        func() map[string]bumper.Card { return loadCards(root) },
+		Movies:       shelf,
 	})
 	if err != nil {
 		return err

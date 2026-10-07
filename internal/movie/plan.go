@@ -315,5 +315,8 @@ func languageTitle(code string) string {
 	if n, ok := names[code]; ok {
 		return n
 	}
+	if n, ok := names[languageCodes[code]]; ok {
+		return n
+	}
 	return code
 }

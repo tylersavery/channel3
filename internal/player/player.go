@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -96,7 +97,34 @@ type Player interface {
 	Position() (string, time.Duration, error)
 	// Events is the stream of end-file and restart events.
 	Events() <-chan Event
+
+	// Movie Mode is the one place with controls, and these are they.
+
+	// LoadMovie plays a movie from offset with the tracks chosen.
+	LoadMovie(path string, offset time.Duration, o MovieOptions) error
+	// SetPause pauses or resumes what is playing.
+	SetPause(paused bool) error
+	// Seek moves playback forward or back by delta.
+	Seek(delta time.Duration) error
+	// SetTrack switches the audio or subtitle track; 0 is no subtitles.
+	SetTrack(kind TrackKind, id int) error
 }
+
+// MovieOptions are a movie's tracks, numbered from 1 in the file's order, and
+// whether its video needs deinterlacing.
+type MovieOptions struct {
+	Audio       int
+	Subtitle    int // 0 is none
+	Deinterlace bool
+}
+
+// TrackKind is audio or subtitles.
+type TrackKind int
+
+const (
+	AudioTrack TrackKind = iota
+	SubtitleTrack
+)
 
 // Timings are the supervisor's deadlines and restart policy.
 //
@@ -276,8 +304,63 @@ func (s *Supervisor) Load(path string, offset time.Duration) error {
 	if offset < 0 {
 		offset = 0
 	}
-	start := fmt.Sprintf("start=%.3f", offset.Seconds())
-	return s.loadFile(path, "loadfile", path, "replace", -1, start)
+	// pause, sid and aid are set for this file alone, so whatever a movie
+	// left them at (paused, subtitles on, a commentary track) never carries
+	// into the broadcast. mpv restores its own defaults when the file ends.
+	opts := fmt.Sprintf("start=%.3f,pause=no,sid=auto,aid=auto", offset.Seconds())
+	return s.loadFile(path, "loadfile", path, "replace", -1, opts)
+}
+
+// LoadMovie plays a movie from offset with the audio and subtitle tracks
+// chosen, numbered from 1 in the file's order; a Subtitle of 0 is none. Like
+// Load, every choice holds for this file only.
+func (s *Supervisor) LoadMovie(path string, offset time.Duration, o MovieOptions) error {
+	offset = max(offset, 0)
+	opts := fmt.Sprintf("start=%.3f,pause=no,aid=%s,sid=%s,deinterlace=%s",
+		offset.Seconds(), trackValue(o.Audio), trackValue(o.Subtitle), yesNo(o.Deinterlace))
+	return s.loadFile(path, "loadfile", path, "replace", -1, opts)
+}
+
+// SetPause pauses or resumes what is playing.
+func (s *Supervisor) SetPause(paused bool) error {
+	return s.setProperty("pause", paused)
+}
+
+// Seek moves playback by delta, forward or back. mpv clamps a seek before the
+// start to the start; one past the end ends the file.
+func (s *Supervisor) Seek(delta time.Duration) error {
+	conn, err := s.currentConn()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), s.timings.Command)
+	defer cancel()
+	_, err = conn.Command(ctx, "seek", delta.Seconds(), "relative")
+	return err
+}
+
+// SetTrack switches the playing file's audio or subtitle track, numbered from
+// 1; a subtitle track of 0 turns subtitles off.
+func (s *Supervisor) SetTrack(kind TrackKind, id int) error {
+	if kind == AudioTrack {
+		return s.setProperty("aid", trackValue(id))
+	}
+	return s.setProperty("sid", trackValue(id))
+}
+
+// trackValue is mpv's value for track id: the number, or "no" for none.
+func trackValue(id int) string {
+	if id <= 0 {
+		return "no"
+	}
+	return strconv.Itoa(id)
+}
+
+func yesNo(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
 }
 
 // Standby shows the Please Stand By card.

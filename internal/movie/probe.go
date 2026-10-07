@@ -158,3 +158,35 @@ func parseProbe(data []byte) (Source, error) {
 	src.Title = p.Format.Tags.Title
 	return src, nil
 }
+
+// Label names a track on screen: its language, and what its title adds, such
+// as "English · Commentary". An audio track without a title gets its channel
+// layout instead, as in "French · 5.1".
+func (t Track) Label() string {
+	name := languageTitle(strings.ToLower(t.Language))
+	if name == "" {
+		name = "Unknown"
+	}
+	switch {
+	case t.Title != "" && !strings.EqualFold(t.Title, name):
+		return name + " · " + t.Title
+	case t.Channels > 0:
+		return name + " · " + layout(t.Channels)
+	}
+	return name
+}
+
+// layout names a channel count the way a disc menu does.
+func layout(channels int) string {
+	switch channels {
+	case 1:
+		return "Mono"
+	case 2:
+		return "Stereo"
+	case 6:
+		return "5.1"
+	case 8:
+		return "7.1"
+	}
+	return strconv.Itoa(channels) + " channels"
+}

@@ -46,6 +46,11 @@ type fakePlayer struct {
 	screen    image.Point
 	screenErr error
 	events    chan player.Event
+
+	movieLoads []movieLoad
+	paused     bool
+	seeks      []time.Duration
+	tracks     []trackCall
 }
 
 // overlayCall is one ShowOverlay the station made.
@@ -184,6 +189,53 @@ func (p *fakePlayer) Position() (string, time.Duration, error) {
 }
 
 func (p *fakePlayer) Events() <-chan player.Event { return p.events }
+
+// movieLoad is one LoadMovie the station made.
+type movieLoad struct {
+	Path   string
+	Offset time.Duration
+	Opts   player.MovieOptions
+}
+
+// trackCall is one SetTrack the station made.
+type trackCall struct {
+	Kind player.TrackKind
+	ID   int
+}
+
+func (p *fakePlayer) LoadMovie(path string, offset time.Duration, o player.MovieOptions) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.loadErr != nil {
+		return p.loadErr
+	}
+	p.movieLoads = append(p.movieLoads, movieLoad{Path: path, Offset: offset, Opts: o})
+	p.position = loadCall{Path: path, Offset: offset}
+	p.paused = false
+	return nil
+}
+
+func (p *fakePlayer) SetPause(paused bool) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.paused = paused
+	return nil
+}
+
+func (p *fakePlayer) Seek(delta time.Duration) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.seeks = append(p.seeks, delta)
+	p.position.Offset = max(p.position.Offset+delta, 0)
+	return nil
+}
+
+func (p *fakePlayer) SetTrack(kind player.TrackKind, id int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.tracks = append(p.tracks, trackCall{Kind: kind, ID: id})
+	return nil
+}
 
 // Loads returns every load, in order.
 func (p *fakePlayer) Loads() []loadCall {

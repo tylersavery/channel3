@@ -95,6 +95,11 @@ type station struct {
 	// settings.Volume.Start.
 	volume int
 	muted  bool
+	// shelf is where Movie Mode's movies are, and its code. Nil means Movie
+	// Mode is off and channel 0 is just a number nobody broadcasts on.
+	shelf *movieShelf
+	// cinema is Movie Mode while it is open, nil otherwise.
+	cinema *cinema
 
 	// channels is the whole station, replaced wholesale at every rollover.
 	// The loop is its only writer and reads it directly; the API reads a copy
@@ -177,6 +182,8 @@ type stationOptions struct {
 	// Cards reads every channel's bumper card, at startup and at each
 	// rollover. Nil means no bumpers.
 	Cards func() map[string]bumper.Card
+	// Movies turns on Movie Mode on channel 0. Nil leaves it off.
+	Movies *movieShelf
 }
 
 // newStation builds a station and tunes it, without starting the loop.
@@ -213,6 +220,7 @@ func newStation(opts stationOptions) (*station, error) {
 		digitTimeout: opts.DigitTimeout,
 		excluded:     make(map[string]map[string]bool),
 		settings:     settings.Default(),
+		shelf:        opts.Movies,
 	}
 	if opts.Settings != nil {
 		s.settings = *opts.Settings
@@ -395,6 +403,11 @@ func (s *station) run(ctx context.Context) error {
 	guide.Stop()
 	defer guide.Stop()
 
+	// movies fires when a Movie Mode screen has waited long enough.
+	movies := time.NewTimer(time.Hour)
+	movies.Stop()
+	defer movies.Stop()
+
 	// Television keys are sent on their own goroutine. cec-ctl can sit for its
 	// full timeout against a set that is off, and an end-file event arriving
 	// meanwhile must not wait behind it: the screen would hold a finished item
@@ -440,6 +453,8 @@ func (s *station) run(ctx context.Context) error {
 			s.showTrackDue()
 		case <-guide.C:
 			s.flipGuide()
+		case <-movies.C:
+			s.movieTimeout()
 		case <-s.rescans:
 			s.rescan()
 		case <-ticker.C:
@@ -449,6 +464,7 @@ func (s *station) run(ctx context.Context) error {
 		s.armBumper(card)
 		s.armTrack(track)
 		s.armGuide(guide)
+		s.armMovies(movies)
 	}
 }
 
@@ -467,7 +483,17 @@ func (s *station) key(k input.Key) {
 		return
 	}
 
+	if s.cinema != nil {
+		s.movieKey(k)
+		return
+	}
 	pending, _ := s.tuner.Pending()
+	if k.Action == input.Digit && k.Digit == 0 && pending == "" && s.shelf != nil {
+		// A 0 on its own is channel 0, Movie Mode. A 0 after other digits is
+		// part of a channel number, such as 10.
+		s.openMovies()
+		return
+	}
 	changed, target := s.tuner.Handle(k, s.now())
 	if changed {
 		s.tuneTo(target)
@@ -866,6 +892,10 @@ func (s *station) sendControl(k input.Key) {
 
 // handle acts on one player event.
 func (s *station) handle(ev player.Event) {
+	if s.watchingMovies() {
+		s.movieEvent(ev)
+		return
+	}
 	switch ev.Kind {
 	case player.EndFile:
 		if ev.Reason == player.ReasonError && s.failed(ev.Path) {
@@ -883,6 +913,11 @@ func (s *station) handle(ev player.Event) {
 		// A fresh mpv starts at full volume, which is past the cap.
 		s.applyVolume()
 		s.play()
+		if s.cinema != nil {
+			// The code screen was over the channel, and a fresh mpv has no
+			// overlays.
+			s.drawMovies()
+		}
 	default:
 		s.log.Warn("ignoring an unknown player event", "kind", ev.Kind)
 	}
@@ -1092,6 +1127,14 @@ func (s *station) standbyOrLog() {
 // rolling over, which is the one moment the library is rescanned and the day's
 // exclusions are forgiven.
 func (s *station) reconcile() {
+	if s.watchingMovies() {
+		// The broadcast is not on screen, so there is nothing to correct.
+		// The tick is used to write down where the movie is instead, and the
+		// rollover, if one is due, happens on the first tick after Movie Mode
+		// closes.
+		s.saveMoviePosition()
+		return
+	}
 	now := s.now()
 
 	if day := s.clock.BroadcastDay(now); !day.Equal(s.day) {
