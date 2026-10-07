@@ -50,7 +50,12 @@ var (
 func ParseName(path string) Name {
 	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	base = makeMKVTitle.ReplaceAllString(base, "")
-	clean := strings.TrimSpace(spaces.ReplaceAllString(separators.Replace(base), " "))
+	// Dots and underscores stand for spaces only in a name that has none,
+	// such as a scene release; "Monsters, Inc. (2001)" keeps its full stop.
+	if !strings.Contains(base, " ") {
+		base = separators.Replace(base)
+	}
+	clean := strings.TrimSpace(spaces.ReplaceAllString(base, " "))
 
 	var n Name
 	title := clean

@@ -19,6 +19,10 @@ func TestParseName(t *testing.T) {
 		{"Wall-E - 2008.mkv", Name{"Wall-E", 2008}},
 		{"/movies/inbox/Up (2009).m4v", Name{"Up", 2009}},
 		{"HOW_TO_TRAIN_YOUR_DRAGON_t01.mkv", Name{"How to Train Your Dragon", 0}},
+		{"Monsters, Inc. (2001).mp4", Name{"Monsters, Inc.", 2001}},
+		{"Monsters.Inc.2001.1080p.BrRip.x264.YIFY.mp4", Name{"Monsters Inc", 2001}},
+		{"A Bug's Life (1998).mkv", Name{"A Bug's Life", 1998}},
+		{"Mr. Peabody & Sherman (2014).mkv", Name{"Mr. Peabody & Sherman", 2014}},
 	}
 	for _, tt := range tests {
 		if got := ParseName(tt.file); got != tt.want {
