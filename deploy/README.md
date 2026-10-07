@@ -122,6 +122,21 @@ A radio station is a channel whose source is a folder of music, such as `local/r
 
 To add songs, drop MP3s (or m4a, flac and the like) into `~/srv/channel3/radio/<station>/` on the Mac and run `make pi-ingest`. The songs are moved to `/srv/channel3/local/radio/<station>/` on the Pi: each is removed from the Mac only after rsync has transferred and checked it, so the Mac's folders empty themselves and the Pi holds the master copy. Title and artist come from the songs' tags, so tag them before dropping them in; an untagged song is titled by its file name.
 
+## 7d. Movies
+
+Movie Mode plays DVD and Blu-ray rips on demand. To add one, drop the rip (`.mkv`, `.mp4` or `.m4v`) into `~/srv/channel3/movies/` on the Mac, in a folder of its own or not, and run `make pi-ingest`. Name it `Title (Year).mkv`; scene-style names such as `Title.Year.1080p.BluRay.mkv` and MakeMKV's `TITLE_t00.mkv` are understood too. Beside it you may drop subtitle files (`Title (Year).srt`, `.en.srt`, `.fr.srt`, `.en.forced.srt`, `.en.sdh.srt`; a file with no language is taken as English) and a poster picture of the same name (`.jpg` or `.png`).
+
+The files are moved to `/srv/channel3/movies-inbox/` on the Pi, removed from the Mac once they arrive whole. A transfer cut off halfway resumes from where it stopped next time. When the service starts again it prepares each rip in the background at low priority, into `/srv/channel3/local/movies/`:
+
+- A rip whose video already plays (H.264, DVD MPEG-2, or 8 bit HEVC, at 1080p or below, not HDR) is copied stream for stream into Matroska. That takes minutes and loses nothing.
+- Anything else (4K, HDR, 10 bit, VC-1) is re-encoded to 1080p H.264, HDR tone mapped to standard range. Expect two to three hours per film on the Pi.
+- Every audio and subtitle track is kept, picture subtitles included, and the `.srt` files are added. English audio that is not a commentary plays first, and full English subtitles are on by default, plain ones preferred over SDH.
+- The poster is the dropped picture, or else a frame from a tenth of the way in.
+
+Once a movie is ready the rip is deleted from the Pi; the Mac's copy is the original. A rip that will not prepare is set aside in `/srv/channel3/movies-failed/`, and the log says why (`journalctl -u channel3 | grep -i movie`). A restart in the middle of a re-encode starts that film again next time.
+
+To try a rip on the Mac first: `bin/channel3 prepare-movie --root ~/srv/channel3 path/to/rip.mkv`, which writes to `~/srv/channel3/local/movies/` and leaves the rip alone.
+
 ## 8. Logs
 
 ```

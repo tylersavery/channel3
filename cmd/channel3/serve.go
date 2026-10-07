@@ -22,6 +22,7 @@ import (
 	"github.com/tylersavery/channel3/internal/homevideo"
 	"github.com/tylersavery/channel3/internal/input"
 	"github.com/tylersavery/channel3/internal/library"
+	"github.com/tylersavery/channel3/internal/movie"
 	"github.com/tylersavery/channel3/internal/player"
 	"github.com/tylersavery/channel3/internal/schedule"
 	"github.com/tylersavery/channel3/internal/settings"
@@ -181,6 +182,14 @@ func serve(ctx context.Context, root string, opts serveOptions) error {
 		uploads = inbox
 		slog.Info("home video uploads are on", "inbox", homeInboxDir(root))
 	}
+
+	// Rips moved in by deploy/ingest.sh are prepared once per start, at low
+	// priority beside the broadcast. Movie Mode reads the prepared movies
+	// when it opens, so nothing needs telling when one is ready.
+	go newMovieInbox(root, movie.Tools{
+		FFmpeg: "ffmpeg", FFprobe: "ffprobe", Threads: 2, Nice: true,
+		Loudness: library.FFmpegLoudness{Nice: true},
+	}, slog.Default()).Run(ctx)
 
 	stopHTTP, err := startHTTP(opts.Listen, api.Deps{
 		Channels: func() []schedule.Channel {

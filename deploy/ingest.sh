@@ -26,6 +26,13 @@
 # the Mac once rsync has transferred and checked it, so the Pi holds the master
 # copy of the music and the Mac's folders empty themselves.
 #
+# Movies work the same way: the movies directory beside the channel configs is
+# a drop zone for DVD and Blu-ray rips, with any .srt subtitles and a poster
+# picture of the same name beside them. Each file is moved to
+# /srv/channel3/movies-inbox and removed from the Mac once it has arrived
+# whole. When the service starts again it prepares them for Movie Mode in the
+# background and deletes each rip once its movie is ready.
+#
 # Ingesting on the Mac into ~/srv/channel3 and rsyncing the library to the Pi is
 # the no-downtime route.
 #
@@ -128,6 +135,24 @@ if [ -d "$local_radio" ]; then
 		--exclude='*' \
 		--rsync-path="sudo -u channel3 rsync" \
 		"$local_radio/" "$PI_HOST:$REMOTE_ROOT/local/radio/"
+fi
+
+local_movies="$(dirname "$LOCAL_CHANNELS")/movies"
+if [ -d "$local_movies" ]; then
+	printf '==> moving movies from %s\n' "$local_movies"
+	# A Blu-ray rip is tens of gigabytes, so an interrupted transfer keeps
+	# what it has in a hidden folder and picks up from there next time. serve
+	# skips hidden files, so it never prepares half a movie.
+	# shellcheck disable=SC2029  # local constant, expanded here on purpose
+	ssh "$PI_HOST" "sudo -u channel3 mkdir -p $REMOTE_ROOT/movies-inbox"
+	rsync -rt --remove-source-files --partial-dir=.rsync-partial --progress \
+		--include='*/' \
+		--include='*.[mM][kK][vV]' --include='*.[mM][pP]4' --include='*.[mM]4[vV]' \
+		--include='*.[sS][rR][tT]' \
+		--include='*.[jJ][pP][gG]' --include='*.[jJ][pP][eE][gG]' --include='*.[pP][nN][gG]' \
+		--exclude='*' \
+		--rsync-path="sudo -u channel3 rsync" \
+		"$local_movies/" "$PI_HOST:$REMOTE_ROOT/movies-inbox/"
 fi
 
 local_settings="$(dirname "$LOCAL_CHANNELS")/settings.yaml"

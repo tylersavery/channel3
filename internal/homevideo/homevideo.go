@@ -205,16 +205,19 @@ func recorded(apple, container string) time.Time {
 	return time.Time{}
 }
 
+// ToneMap is the filter chain that brings HDR video to standard dynamic range:
+// linearise, map BT.2020 to BT.709, tone map, and come back to limited range 8
+// bit. Hable keeps faces natural on a phone clip and skin tones right in a film.
+const ToneMap = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709," +
+	"tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv"
+
 // Filter returns the ffmpeg filter graph that turns clip into a prepared
 // 1080p frame, ending in the label [v].
 func Filter(clip Clip) string {
 	var b strings.Builder
 	b.WriteString("[0:v]")
 	if clip.HDR {
-		// Linearise, map BT.2020 to BT.709, tone map, and come back to
-		// limited range 8 bit. Hable keeps faces natural on a phone clip.
-		b.WriteString("zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709," +
-			"tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,")
+		b.WriteString(ToneMap + ",")
 	}
 
 	if !clip.Portrait() {
