@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // Uploads receives home video clips. cmd/channel3 satisfies it with the inbox
@@ -21,6 +22,10 @@ type Uploads interface {
 // maxUpload is the largest clip accepted. A ten minute 4K clip from an iPhone
 // is about 4 GB; past this the upload is cut off rather than filling the disk.
 const maxUpload = 8 << 30
+
+// uploadTimeout is how long one upload may take to arrive: a 4 GB clip at a
+// modest 3 MB/s of Wi-Fi, with room to spare.
+const uploadTimeout = 30 * time.Minute
 
 // handleUpload stores a home video sent from a phone.
 //
@@ -52,6 +57,14 @@ func (s *server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Allow", "POST")
 		reject(http.StatusMethodNotAllowed, "send the clip with POST")
 		return
+	}
+	// The server gives every request a few seconds to arrive, which a video
+	// over Wi-Fi never does. This one request gets as long as a large clip
+	// takes, and the time to answer once it has.
+	rc := http.NewResponseController(w)
+	deadline := time.Now().Add(uploadTimeout)
+	if err := errors.Join(rc.SetReadDeadline(deadline), rc.SetWriteDeadline(deadline)); err != nil {
+		slog.Warn("could not give the upload more time; a large clip may be cut off", "error", err)
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxUpload)
 

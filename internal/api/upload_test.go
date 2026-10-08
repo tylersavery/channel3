@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeUploads records what the handler hands over.
@@ -183,5 +184,52 @@ func TestTextBodyIsRefusedWithAHint(t *testing.T) {
 		if up.name != "" {
 			t.Errorf("%s: a text body was stored", contentType)
 		}
+	}
+}
+
+// slowBody hands out its bytes a chunk at a time with a pause before each, the
+// way a video arrives over Wi-Fi.
+type slowBody struct {
+	chunks int
+	pause  time.Duration
+}
+
+func (b *slowBody) Read(p []byte) (int, error) {
+	if b.chunks == 0 {
+		return 0, io.EOF
+	}
+	time.Sleep(b.pause)
+	b.chunks--
+	return copy(p, "video bytes "), nil
+}
+
+// TestSlowUploadOutlastsTheServerTimeout is the bug a phone hit: serve gives
+// every request ten seconds to arrive, and a video over Wi-Fi takes longer.
+// The upload handler extends its own deadline.
+func TestSlowUploadOutlastsTheServerTimeout(t *testing.T) {
+	up := &fakeUploads{}
+	srv := httptest.NewUnstartedServer(uploadServer(up, "6635"))
+	srv.Config.ReadTimeout = 200 * time.Millisecond
+	srv.Config.WriteTimeout = 200 * time.Millisecond
+	srv.Start()
+	defer srv.Close()
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/upload", &slowBody{chunks: 6, pause: 100 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-Upload-PIN", "6635")
+	req.Header.Set("X-Filename", "IMG_0001.MOV")
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		msg, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status %d: %s", resp.StatusCode, msg)
+	}
+	if up.body != strings.Repeat("video bytes ", 6) {
+		t.Errorf("stored %q", up.body)
 	}
 }
