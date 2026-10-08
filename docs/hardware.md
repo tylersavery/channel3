@@ -55,22 +55,31 @@ This covers Phase 5 task 9 except boot-to-video, which needs HDMI and the servic
 
 ## Flirc key table
 
-Flirc 2.0 (firmware v4.10.7) programmed 2026-10-05 on the Mac with `flirc_util` from the Flirc app 3.27.19 (`brew install --cask flirc`), against the Flipper Big Button remote straight out of the box, with no brand code set. Whichever brand the remote emits by default, the Samsung must be checked to ignore it. Backup: `~/srv/channel3/flirc-flipper.fcfg`, restore with `flirc_util loadconfig`.
+Re-recorded 2026-10-08, after the Flipper was given a brand code. The Samsung obeyed the Flipper's factory preset (which includes Samsung), so its volume bypassed the Pi's cap and it could switch the TV's input.
 
-On the Pi it appears as `flirc.tv flirc Keyboard`, `/dev/input/by-id/usb-flirc.tv_flirc_DE80B887503243584C2E3120FF04273C-if01-event-kbd`. Codes read with `evtest`:
+**The Flipper (Big Button, V14).** V14 takes 5-digit codes from the V14 manual (https://flipper.zendesk.com/hc/en-us/article_attachments/49607980942868); codes from older manuals do nothing.
+- Reset it: hold ADD until solid, then type 954.
+- Set the TV code to **Sony 03611**. There is no STB code and no favourites: once favourites are saved, Ch± sends strings of digits.
+- The Samsung ignores everything the Flipper sends except **On/Off**, which still sends the Samsung's power signal and turns the TV on and off. That is how it should be.
+
+**The Flirc.** Flirc 2.0, firmware v4.10.7, programmed with `flirc_util` from the Flirc app 3.27.19 (`brew install --cask flirc`).
+- Backup: `~/srv/channel3/flirc-flipper-sony.fcfg`, restored with `flirc_util loadconfig`.
+- The Flipper's codes record with an IK (inter-key) value of 44 or 45. Stray infrared from the room records with other values, such as 130, without any button being pressed. Re-recording a button should say "button already exists".
+
+On the Pi it appears as `flirc.tv flirc Keyboard`, `/dev/input/by-id/usb-flirc.tv_flirc_DE80B887503243584C2E3120FF04273C-if01-event-kbd`.
 
 | Remote button | Recorded as | Pi receives | Service action |
 |---|---|---|---|
-| Channel up | `record_api 0 75` (keyboard Page Up) | `KEY_PAGEUP` | channel up |
-| Channel down | `record_api 0 78` (keyboard Page Down) | `KEY_PAGEDOWN` | channel down |
-| 1 to 9, 0 | `record_api 0 30`..`39` (number row) | `KEY_1`..`KEY_0` | digits |
-| Volume up | `record vol_up` (consumer page) | `KEY_VOLUMEUP` | CEC volume up |
-| Volume down | `record vol_down` | `KEY_VOLUMEDOWN` | CEC volume down |
-| Mute | `record mute` | `KEY_MUTE` | CEC mute |
-| On/Off | `record wake` | **nothing** | none yet |
+| Channel up | `record_api 0 75` (keyboard Page Up) | `KEY_PAGEUP` | channel up; next page on the movie menu |
+| Channel down | `record_api 0 78` (keyboard Page Down) | `KEY_PAGEDOWN` | channel down; previous page on the movie menu |
+| 1 to 9, 0 | `record_api 0 30`..`39` (number row) | `KEY_1`..`KEY_0` | digits; 0 alone opens Movie Mode; movie controls |
+| Volume up | `record vol_up` (consumer page) | `KEY_VOLUMEUP` | Pi volume up, capped by `settings.yaml` |
+| Volume down | `record vol_down` | `KEY_VOLUMEDOWN` | Pi volume down |
+| Mute | `record mute` | `KEY_MUTE` | Pi mute |
+| On/Off | `record_api 0 69` (keyboard F12) | `KEY_F12` | none, by choice; the button is for the Samsung |
 
-- Keyboard-page power, volume and mute (`record_api 0 102/128/129/127`) record without complaint but never reach the Pi. Use the consumer-page `record vol_up` and its siblings instead.
-- `record wake` is a USB remote-wakeup signal, not a key, so a running Pi sees nothing. **Open:** On/Off has no working key. If CEC works, re-record it as a spare keyboard key (for example F12) and alias that key to Power in `internal/input/evdev.go`. If CEC does not work, On/Off talks straight to the TV and needs no mapping.
+- On/Off is recorded only so it lands on a key nothing listens for. **Never record it as power** (`record_api 0 102`): systemd-logind's default `HandlePowerKey=poweroff` would shut the Pi down on every press.
+- Keyboard-page volume and mute (`record_api 0 128/129/127`) record without complaint but never reach the Pi. Use the consumer-page `record vol_up` and its siblings instead.
 - With no Flirc plugged in, `serve` falls back to `vc4-hdmi-0`, the kernel's HDMI-CEC remote passthrough device. With the Flirc plugged in before the service starts, autodetection picks it by name. A Flirc plugged in later is not noticed until the service restarts.
 
 Tuning from the remote (Phase 6 task 7), with test channels 3, 5 and 12 on the stand-in monitor: channel up 3→5→12→3 wraps, channel down 3→12, `5` tunes 5, `1` `2` tunes 12, `9` logs "no channel has that number, staying put", `3` tunes 3. Every tune loaded within the same second as the press. No key echo was reported on the screen.
@@ -106,7 +115,6 @@ Not plugged in yet. `/sys/class/rtc/rtc0/battery_voltage` reads 0.
 
 ## Open issues
 
-- On/Off on the remote sends nothing (see Flirc key table).
 - A Flirc plugged in after the service starts is not picked up until a restart.
 - `pi-setup.sh` does not yet quiet cloud-init or set the EEPROM options above. A fresh install needs them by hand.
 - The drive's spin-down timer cannot be set.

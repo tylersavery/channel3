@@ -333,21 +333,26 @@ Stop it with `sudo pkill mpv`.
 
 ### Step 14. Program the Flirc (Mac)
 
-Done 2026-10-05; the table is in `docs/hardware.md`. To redo it from scratch, or for a new Flirc:
+Done 2026-10-05, then redone 2026-10-08 for the Sony code. The table is in `docs/hardware.md`. To redo it from scratch, or for a new Flirc:
 
-1. Install the Flirc app (`brew install --cask flirc`). Its command-line tool is `/Applications/Flirc.app/Contents/Resources/flirc_util`, shortened to `flirc_util` below.
-2. Plug the Flirc into the Mac. `flirc_util settings` lists what is recorded. `flirc_util format` wipes it.
-3. Run each command, then press the matching remote button at the Flirc:
+1. Set the Flipper up first (V14 codes):
+   - Reset it: hold ADD until solid, then type 954.
+   - Hold TV until solid, then type **03611** (Sony). Add no STB code and no favourites.
+   - Check that Volume, Channel and the digits do nothing to the Samsung. On/Off should still switch the Samsung.
+2. Install the Flirc app (`brew install --cask flirc`). Its command-line tool is `/Applications/Flirc.app/Contents/Resources/flirc_util`, shortened to `flirc_util` below.
+3. Plug the Flirc into the Mac. `flirc_util settings` lists what is recorded. `flirc_util format` wipes it.
+4. Turn the Flirc away from lights and the TV, since stray infrared records as phantom buttons. Run each command, then press the matching remote button once, about a foot from the Flirc:
    - Channel up: `flirc_util record_api 0 75` (Page Up)
    - Channel down: `flirc_util record_api 0 78` (Page Down)
    - Digits 1 to 9: `flirc_util record_api 0 30` up to `0 38`. Digit 0: `flirc_util record_api 0 39`
    - Volume up, volume down, mute: `flirc_util record vol_up`, `record vol_down`, `record mute`. Use these media-key forms. Keyboard-page volume codes record fine but never reach the Pi.
-   - On/Off: **open**. `record wake` sends nothing to a running Pi. See `docs/hardware.md`.
-4. Back it up with `flirc_util saveconfig ~/srv/channel3/flirc-flipper`, which writes `flirc-flipper.fcfg`.
+   - On/Off: `flirc_util record_api 0 69` (F12, which the Pi ignores). Never record it as the power key, because the Pi would shut down.
+5. Check `flirc_util settings`. Every Flipper button shows IK 44 or 45 (On/Off, being the Samsung's code, shows 108). Remove an entry with any other IK using `flirc_util delete_index N`; it is stray light.
+6. Back it up with `flirc_util saveconfig ~/srv/channel3/flirc-flipper-sony`, which writes `flirc-flipper-sony.fcfg`.
 
-Restoring onto a reset Flirc is `flirc_util loadconfig ~/srv/channel3/flirc-flipper.fcfg`.
+Restoring onto a reset Flirc is `flirc_util loadconfig ~/srv/channel3/flirc-flipper-sony.fcfg`.
 
-**Done when:** `flirc_util settings` lists every button once.
+**Done when:** `flirc_util settings` lists 16 buttons, each once.
 
 ### Step 15. Read the Flirc key codes on the Pi (Pi)
 
