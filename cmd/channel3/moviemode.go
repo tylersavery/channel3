@@ -305,7 +305,7 @@ func (s *station) chooseMovie(i int) {
 	if err != nil {
 		s.log.Warn("could not read where movies were stopped; starting from the beginning", "error", err)
 	}
-	if at := positions.ResumeAt(m); at > 0 {
+	if at := positions.ResumeAt(m.File, time.Duration(m.Duration*float64(time.Second))); at > 0 {
 		c.screen, c.resumeAt = screenResume, at
 		c.deadline = s.now().Add(menuIdle)
 		s.drawMovies()

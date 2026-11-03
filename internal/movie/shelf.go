@@ -108,17 +108,22 @@ func (p Positions) Write(path string) error {
 
 // Resume thresholds: a movie stopped in its first couple of minutes starts
 // over, and one stopped in its last few, which is the credits, counts as
-// watched.
+// watched. Something short, an episode on the On Demand shelf, has both scaled
+// to its length, so a seven minute episode still offers to resume.
 const (
 	resumeAfter  = 2 * time.Minute
 	finishedLast = 5 * time.Minute
 )
 
-// ResumeAt is where m should offer to resume from, or zero to start over.
-func (p Positions) ResumeAt(m Movie) time.Duration {
-	at := p[m.File]
-	length := time.Duration(m.Duration * float64(time.Second))
-	if at < resumeAfter || (length > 0 && at > length-finishedLast) {
+// ResumeAt is where the video kept under key, length long, should offer to
+// resume from, or zero to start over. A movie's key is its file name.
+func (p Positions) ResumeAt(key string, length time.Duration) time.Duration {
+	at := p[key]
+	after, last := resumeAfter, finishedLast
+	if length > 0 {
+		after, last = min(after, length/8), min(last, length/12)
+	}
+	if at < after || (length > 0 && at > length-last) {
 		return 0
 	}
 	return at

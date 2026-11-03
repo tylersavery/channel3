@@ -72,19 +72,25 @@ func TestPositionsRoundTrip(t *testing.T) {
 }
 
 func TestResumeAt(t *testing.T) {
-	m := Movie{File: "Up.mkv", Duration: 96 * 60}
 	tests := []struct {
-		at   time.Duration
-		want time.Duration
+		name   string
+		length time.Duration
+		at     time.Duration
+		want   time.Duration
 	}{
-		{0, 0},
-		{90 * time.Second, 0},
-		{40 * time.Minute, 40 * time.Minute},
-		{93 * time.Minute, 0},
+		{"movie, not started", 96 * time.Minute, 0, 0},
+		{"movie, first minutes", 96 * time.Minute, 90 * time.Second, 0},
+		{"movie, partway", 96 * time.Minute, 40 * time.Minute, 40 * time.Minute},
+		{"movie, credits", 96 * time.Minute, 93 * time.Minute, 0},
+		{"episode, first moments", 7 * time.Minute, 40 * time.Second, 0},
+		{"episode, partway", 7 * time.Minute, 3 * time.Minute, 3 * time.Minute},
+		{"episode, past two minutes", 7 * time.Minute, 2*time.Minute + 10*time.Second, 2*time.Minute + 10*time.Second},
+		{"episode, last seconds", 7 * time.Minute, 6*time.Minute + 40*time.Second, 0},
+		{"unknown length", 0, 40 * time.Minute, 40 * time.Minute},
 	}
 	for _, tt := range tests {
-		if got := (Positions{"Up.mkv": tt.at}).ResumeAt(m); got != tt.want {
-			t.Errorf("stopped at %v: resume at %v, want %v", tt.at, got, tt.want)
+		if got := (Positions{"Up.mkv": tt.at}).ResumeAt("Up.mkv", tt.length); got != tt.want {
+			t.Errorf("%s: stopped at %v: resume at %v, want %v", tt.name, tt.at, got, tt.want)
 		}
 	}
 }
