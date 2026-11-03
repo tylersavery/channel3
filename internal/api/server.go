@@ -4,9 +4,10 @@
 // Nothing here changes what plays. There is no endpoint that tunes, pauses or
 // seeks, by design: the television is driven by the remote and by the clock,
 // and a phone on the home network is only ever allowed to look. The handlers
-// read the same pure schedule the broadcast loop reads. The one exception is
-// /api/upload, which hands a home video to the Home Movies inbox when the box
-// has an upload PIN and the request carries it.
+// read the same pure schedule the broadcast loop reads. The exceptions are
+// /api/upload, which hands a home video to the Home Movies inbox, and saving
+// the On Demand shelf and its covers, which changes what channel 0's menu
+// offers. Both need the box to have an upload PIN and the request to carry it.
 //
 // They do not see everything the loop sees. An item the loop has excluded
 // because mpv could not open it is still in the schedule these handlers
@@ -24,6 +25,7 @@ import (
 	"time"
 
 	"github.com/tylersavery/channel3/internal/schedule"
+	"github.com/tylersavery/channel3/internal/shelf"
 )
 
 // Deps is everything the API reads.
@@ -51,6 +53,13 @@ type Deps struct {
 	// to carry to send one. With either unset there is no upload endpoint.
 	Uploads   Uploads
 	UploadPIN string
+	// Shelf is the On Demand shelf and Covers its pictures. Without Shelf
+	// there are no shelf endpoints; saving needs UploadPIN as well.
+	// ShelfSaved, when set, is told after every save, which is how covers
+	// for newly added videos get made.
+	Shelf      ShelfStore
+	Covers     *shelf.Covers
+	ShelfSaved func()
 }
 
 // server holds the dependencies with their defaults applied.
@@ -84,6 +93,12 @@ func New(deps Deps) http.Handler {
 	// The one endpoint that is not read only. It changes nothing about what
 	// plays; it hands a clip to the Home Movies inbox, and only with the PIN.
 	mux.Handle("/api/upload", http.HandlerFunc(s.handleUpload))
+	mux.Handle("/api/library", readOnly(http.HandlerFunc(s.handleLibrary)))
+	// The shelf is read openly and saved with the PIN. Saving changes what
+	// the On Demand menu offers, never what plays.
+	mux.Handle("/api/shelf", http.HandlerFunc(s.handleShelf))
+	mux.Handle("/api/shelf/cover", http.HandlerFunc(s.handleCover))
+	mux.Handle("/api/shelf/cover/frame", http.HandlerFunc(s.handleCoverFrame))
 	mux.Handle("/api/", readOnly(http.HandlerFunc(handleUnknownAPI)))
 	mux.Handle("/", readOnly(s.ui()))
 	return mux

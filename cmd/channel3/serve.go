@@ -26,6 +26,7 @@ import (
 	"github.com/tylersavery/channel3/internal/player"
 	"github.com/tylersavery/channel3/internal/schedule"
 	"github.com/tylersavery/channel3/internal/settings"
+	"github.com/tylersavery/channel3/internal/shelf"
 	"github.com/tylersavery/channel3/web"
 )
 
@@ -191,28 +192,41 @@ func serve(ctx context.Context, root string, opts serveOptions) error {
 		Loudness: library.FFmpegLoudness{Nice: true},
 	}, slog.Default()).Run(ctx)
 
+	// The guide's view of the station. The exclusions go with it, so the
+	// guide shows the order the television is really playing rather than one
+	// that still includes a file mpv could not open. The on-screen guide is
+	// left out: on a phone it would only repeat its music channel.
+	guideChannels := func() []schedule.Channel {
+		if s := current.Load(); s != nil {
+			return slices.DeleteFunc(s.PlayableChannels(), func(ch schedule.Channel) bool { return ch.Guide })
+		}
+		return nil
+	}
+
+	// The On Demand shelf is read by the guide and the television alike, and
+	// saved from the guide with the upload PIN. Covers for what is added are
+	// made in the background.
+	shelfStore := shelf.NewStore(root)
+	covers := shelf.Covers{Dir: shelf.CoversDir(root)}
+	coverMaker := newShelfCovers(shelfStore, covers, guideChannels, slog.Default())
+	go coverMaker.Run(ctx)
+
 	stopHTTP, err := startHTTP(opts.Listen, api.Deps{
-		Channels: func() []schedule.Channel {
-			if s := current.Load(); s != nil {
-				// The exclusions go with it, so the guide shows the order the
-				// television is really playing rather than one that still
-				// includes a file mpv could not open. The on-screen guide is
-				// left out: on a phone it would only repeat its music channel.
-				return slices.DeleteFunc(s.PlayableChannels(), func(ch schedule.Channel) bool { return ch.Guide })
-			}
-			return nil
-		},
-		Now: time.Now,
+		Channels: guideChannels,
+		Now:      time.Now,
 		Tuned: func() string {
 			if s := current.Load(); s != nil {
 				return s.Tuned()
 			}
 			return ""
 		},
-		Clock:     clock,
-		UI:        ui,
-		Uploads:   uploads,
-		UploadPIN: opts.UploadPIN,
+		Clock:      clock,
+		UI:         ui,
+		Uploads:    uploads,
+		UploadPIN:  opts.UploadPIN,
+		Shelf:      shelfStore,
+		Covers:     &covers,
+		ShelfSaved: coverMaker.Kick,
 	})
 	if err != nil {
 		return err
@@ -288,6 +302,7 @@ func serve(ctx context.Context, root string, opts serveOptions) error {
 		return err
 	}
 	current.Store(station)
+	coverMaker.Kick()
 
 	slog.Info("broadcasting", "root", root, "channel", station.Tuned(), "pid", os.Getpid())
 	return station.run(ctx)
