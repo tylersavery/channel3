@@ -28,7 +28,7 @@ Channels are sorted by number, lowest first, in every response.
 
 Errors are `{"error": "<message>"}` with a 4xx or 5xx status.
 
-Only `GET` and `HEAD` are accepted. Every other method is `405` with `Allow: GET, HEAD` and a JSON error body.
+Only `GET` and `HEAD` are accepted, except by `POST /api/upload` and the On Demand shelf's writes below, which need the box to have an upload PIN and the request to carry it in `X-Upload-PIN`. Every other method is `405` with an `Allow` header and a JSON error body.
 
 Every API response carries `Cache-Control: no-store`. The guide is the clock and nothing about it may be held.
 
@@ -101,6 +101,51 @@ Slots are contiguous: each slot's `end` is the next slot's `start`. The last slo
 An airing that crosses 04:00 is cut there and the next slot is the first item of the new broadcast day's order, which is what the service really does at the rollover.
 
 `slots` is an empty array, never null, for a channel with no playable items.
+
+## The On Demand shelf
+
+The shelf is what channel 0 offers after the code besides the movies: library videos picked by hand, on their own or in a folder per show. It lives in `<root>/shelf.json`, written only by these endpoints, and changes what channel 0's menu offers and nothing else. Reads are open. Writes need the upload PIN in `X-Upload-PIN`: a missing or wrong one is `403`, and on a box without a PIN they are `404`.
+
+### GET /api/library
+
+Every video the station can play, by channel in number order, and whether each is on the shelf.
+
+```json
+{"channels": [{"id": "farmtv", "number": 4, "name": "Farm TV", "items": [
+  {"id": "7fwZuZK2Qww", "title": "Combine Time & Other Tractor Ted Stories", "duration": 1510.2, "on_shelf": true}
+]}]}
+```
+
+A song carries `artist`. The guide page leaves songs out of its list.
+
+### GET /api/shelf
+
+```json
+{"revision": 4, "editable": true, "entries": [
+  {"folder": {"id": "e6870380", "name": "Tractor Ted", "cover": "/api/shelf/cover?key=folder%3Ae6870380&v=1793717413002", "items": [
+    {"channel": "farmtv", "id": "7fwZuZK2Qww", "library_title": "Combine Time & Other Tractor Ted Stories", "duration": 1510.2, "missing": false, "cover": "/api/shelf/cover?key=farmtv%2F7fwZuZK2Qww&v=1793717402685"}
+  ]}},
+  {"item": {"channel": "sesame", "id": "BQbjApUBrEc", "title": "Telly", "library_title": "Telly and the Fire Bell (1984)", "duration": 3534.6, "missing": false, "cover": ""}}
+]}
+```
+
+`title` is the shelf's own name for a video and is absent when the library's is used. `missing` marks a video that has left the library: it stays on the shelf, is left off the television's menu, and comes back if the video does. `cover` is empty while a cover is being made. A folder's `cover` is its own picture, else its first episode's. `editable` says the box has a PIN.
+
+### PUT /api/shelf
+
+The whole shelf, with the revision it was read at: `{"revision": 4, "entries": [...]}`, entries as above, of which only `channel`, `id`, `title`, and a folder's `id`, `name` and `items` are read. A folder sent without an id is given one. Every video may appear once. The answer is the saved shelf, one revision on. A revision the file has moved on from is `409`, and the client should read the shelf again. After a save the service makes a cover for each new video, a frame a quarter of the way in, at low priority in the background.
+
+### GET /api/shelf/cover?key=…
+
+A cover as JPEG. `key` is `channel/id` for a video or `folder:id` for a folder. `404` until it is made. The URLs the shelf reports carry `v`, the cover's time, so a changed cover is a new URL and the old one may be cached for a day.
+
+### PUT /api/shelf/cover?key=…
+
+Replaces a cover with the request body, a JPEG or PNG of up to 32 MB, scaled to 960 wide. The key must be on the shelf.
+
+### POST /api/shelf/cover/frame?key=…&at=…
+
+Makes a video's cover from the frame `at` seconds in. Answers `{"cover": "<url>"}`.
 
 ## GET / and static paths
 

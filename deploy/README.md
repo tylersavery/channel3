@@ -152,6 +152,14 @@ The channel carries on by the clock the whole time, so leaving Movie Mode lands 
 
 To try a rip on the Mac first: `bin/channel3 prepare-movie --root ~/srv/channel3 path/to/rip.mkv`, which writes to `~/srv/channel3/local/movies/` and leaves the rip alone.
 
+## 7e. On Demand
+
+Channel 0 also offers episodes picked by hand from the library, beside the movies. Once anything is on the shelf, the menu after the code is ON DEMAND: a Movies folder first, then the shelf in its own order, as 16:9 pictures three across. A folder (Tractor Ted, say) opens to its episodes; 0 inside a folder goes back up, and 0 at the top goes back to TV. Episodes play with the movie keys above, except 8 and 2, since a video from the web has one audio track and no subtitles. One stopped partway offers to resume like a movie, with the thresholds scaled to its length. With nothing on the shelf the menu is the movies alone, as before.
+
+The shelf is managed from the guide page's On Demand tab (`http://channel3.local/#on-demand`): every video in the library with a switch to put it on the shelf, into a folder or on its own, and for what is on it, reorder, rename, move between folders, remove, and change the cover to another frame or a picture from the phone. Each channel on the Guide tab has "Save to On Demand" for whatever it is airing. The first change asks for the code, the upload PIN, and the phone remembers it.
+
+The shelf is `/srv/channel3/shelf.json` and the covers are in `/srv/channel3/shelf-covers/`. It only points at the library, so a video must be on a channel first; one that leaves the library drops off the menu and comes back if it returns.
+
 ## 8. Logs
 
 ```
