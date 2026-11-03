@@ -1,7 +1,9 @@
-// Typed access to the read-only Channel Three API.
+// Typed access to the Channel Three API.
 //
 // The contract lives in docs/integration/guide-api.md. Nothing here changes
-// what is playing: the whole API is GET, and the page never asks it to tune.
+// what is playing, and the page never asks it to tune. The one thing it writes
+// is the On Demand shelf, which changes what channel 0's menu offers, and only
+// with the upload PIN.
 
 /** An airing reported by /api/now, with how far into it the broadcast is. */
 export interface Airing {
@@ -77,9 +79,20 @@ async function getJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
     headers: { Accept: 'application/json' },
   })
   if (!response.ok) {
-    throw new Error(`${path}: ${await errorMessage(response)}`)
+    throw new StationError(`${path}: ${await errorMessage(response)}`, response.status)
   }
   return (await response.json()) as T
+}
+
+/** A failed request, with its status so a caller can tell a wrong PIN (403) from a stale save (409). */
+export class StationError extends Error {
+  readonly status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'StationError'
+    this.status = status
+  }
 }
 
 /** Pulls the station's error message out of a failed response. */
@@ -124,4 +137,145 @@ export function fetchGuide(
   signal?: AbortSignal,
 ): Promise<GuideResponse> {
   return getJSON<GuideResponse>(`/api/guide?hours=${String(hours)}`, signal)
+}
+
+/** One video of /api/library. */
+export interface LibraryItem {
+  id: string
+  title: string
+  artist?: string
+  duration: number
+  on_shelf: boolean
+}
+
+export interface LibraryChannel {
+  id: string
+  number: number
+  name: string
+  /** Empty, never null. */
+  items: LibraryItem[]
+}
+
+export interface LibraryResponse {
+  channels: LibraryChannel[]
+}
+
+/** One video on the shelf. */
+export interface ShelfItem {
+  channel: string
+  id: string
+  /** The shelf's own title. Absent when the library's is used. */
+  title?: string
+  library_title: string
+  duration: number
+  /** The video has left the library. It stays on the shelf and comes back if the video does. */
+  missing: boolean
+  /** The cover's URL, or empty while it is being made. */
+  cover: string
+}
+
+export interface ShelfFolder {
+  /** Empty for a folder this page has just made; the station gives it one. */
+  id: string
+  name: string
+  /** Its own picture, else its first episode's, else empty. */
+  cover: string
+  items: ShelfItem[]
+}
+
+/** One place at the top of the shelf: an item or a folder. */
+export interface ShelfEntry {
+  item?: ShelfItem
+  folder?: ShelfFolder
+}
+
+export interface ShelfResponse {
+  revision: number
+  entries: ShelfEntry[]
+  /** The box has a PIN, so the shelf can be changed. */
+  editable: boolean
+}
+
+/** Every video the station can play, by channel. */
+export function fetchLibrary(signal?: AbortSignal): Promise<LibraryResponse> {
+  return getJSON<LibraryResponse>('/api/library', signal)
+}
+
+/** The On Demand shelf. */
+export function fetchShelf(signal?: AbortSignal): Promise<ShelfResponse> {
+  return getJSON<ShelfResponse>('/api/shelf', signal)
+}
+
+/** Sends a change with the PIN and reads the JSON answer. */
+async function change<T>(
+  method: string,
+  path: string,
+  pin: string,
+  body: BodyInit,
+  contentType: string,
+): Promise<T> {
+  const response = await fetch(path, {
+    method,
+    body,
+    headers: { Accept: 'application/json', 'Content-Type': contentType, 'X-Upload-PIN': pin },
+  })
+  if (!response.ok) {
+    throw new StationError(`${path}: ${await errorMessage(response)}`, response.status)
+  }
+  return (await response.json()) as T
+}
+
+/**
+ * Saves the shelf on top of `revision`, the one it was read at. A 409 means
+ * another phone saved in between, and the shelf should be read again.
+ */
+export function saveShelf(
+  revision: number,
+  entries: ShelfEntry[],
+  pin: string,
+): Promise<ShelfResponse> {
+  return change<ShelfResponse>(
+    'PUT',
+    '/api/shelf',
+    pin,
+    JSON.stringify({ revision, entries: entriesToSave(entries) }),
+    'application/json',
+  )
+}
+
+/** The shelf as the station takes it: references and names, nothing it fills in itself. */
+export function entriesToSave(entries: ShelfEntry[]): unknown[] {
+  const item = (it: ShelfItem) => ({
+    channel: it.channel,
+    id: it.id,
+    ...(it.title ? { title: it.title } : {}),
+  })
+  return entries.flatMap((entry): unknown[] => {
+    if (entry.folder) {
+      return [{ folder: { id: entry.folder.id, name: entry.folder.name, items: entry.folder.items.map(item) } }]
+    }
+    return entry.item ? [{ item: item(entry.item) }] : []
+  })
+}
+
+/** Replaces a cover with a picture from the phone. */
+export function uploadCover(key: string, picture: Blob, pin: string): Promise<{ cover: string }> {
+  return change<{ cover: string }>(
+    'PUT',
+    `/api/shelf/cover?key=${encodeURIComponent(key)}`,
+    pin,
+    picture,
+    picture.type || 'application/octet-stream',
+  )
+}
+
+/** Makes an item's cover from the frame `at` seconds into its video. */
+export function grabFrame(key: string, at: number, pin: string): Promise<{ cover: string }> {
+  return change<{ cover: string }>(
+    'POST',
+    `/api/shelf/cover/frame?key=${encodeURIComponent(key)}&at=${at.toFixed(1)}`,
+    pin,
+    '',
+    'text/plain',
+  )
 }

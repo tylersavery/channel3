@@ -133,6 +133,18 @@ export function remainingLabel(offset: number, duration: number): string {
   return `${String(minutes)} min left`
 }
 
+/** A video's length for a list: "7 min", or "1 h 36 min" for a movie. */
+export function formatDuration(seconds: number): string {
+  const minutes = Math.max(1, Math.round(seconds / 60))
+  if (minutes < 60) {
+    return `${String(minutes)} min`
+  }
+  const rest = minutes % 60
+  return rest === 0
+    ? `${String(Math.floor(minutes / 60))} h`
+    : `${String(Math.floor(minutes / 60))} h ${String(rest)} min`
+}
+
 /**
  * Moves an offset forward by the seconds elapsed since the station reported it.
  *

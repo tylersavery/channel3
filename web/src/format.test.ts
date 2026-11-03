@@ -6,6 +6,7 @@ import {
   advanceOffset,
   formatClock,
   formatClockWithSeconds,
+  formatDuration,
   laterSlots,
   minutesLeft,
   progressFraction,
@@ -182,5 +183,14 @@ describe('itemLabel', () => {
   })
   it('adds the artist for a song', () => {
     expect(itemLabel({ title: 'Help!', artist: 'The Beatles' })).toBe('Help! · The Beatles')
+  })
+})
+
+describe('formatDuration', () => {
+  it('writes minutes, and hours for anything long', () => {
+    expect(formatDuration(20)).toBe('1 min')
+    expect(formatDuration(7 * 60 + 10)).toBe('7 min')
+    expect(formatDuration(60 * 60)).toBe('1 h')
+    expect(formatDuration(96 * 60)).toBe('1 h 36 min')
   })
 })

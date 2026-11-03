@@ -1,6 +1,6 @@
 // The channel list: one row per channel, in channel-number order.
 
-import type { GuideChannel, GuideResponse, NowChannel, NowResponse } from './api'
+import type { Airing, GuideChannel, GuideResponse, NowChannel, NowResponse } from './api'
 import {
   itemLabel,
   advanceOffset,
@@ -17,10 +17,20 @@ export interface GuideProps {
   guide: GuideResponse | null
   /** Seconds since `now` was fetched, so the bars move between refreshes. */
   elapsedSeconds: number
+  /** The On Demand shelf, when the box has one that can be changed. */
+  shelf?: GuideShelf
+}
+
+/** What the guide needs to save what is on to the On Demand shelf. */
+export interface GuideShelf {
+  /** Every video on the shelf, as channel/id. */
+  keys: Set<string>
+  busy: boolean
+  add: (channel: string, airing: Airing) => void
 }
 
 /** Every channel, lowest number first. */
-export function Guide({ now, guide, elapsedSeconds }: GuideProps) {
+export function Guide({ now, guide, elapsedSeconds, shelf }: GuideProps) {
   const channels = [...now.channels].sort((a, b) => a.number - b.number)
   const guideByID = new Map<string, GuideChannel>(
     (guide?.channels ?? []).map((channel) => [channel.id, channel]),
@@ -45,6 +55,7 @@ export function Guide({ now, guide, elapsedSeconds }: GuideProps) {
             guideFrom={guide?.from}
             tuned={channel.id === now.tuned}
             elapsedSeconds={elapsedSeconds}
+            shelf={shelf}
           />
         </li>
       ))}
@@ -59,6 +70,7 @@ interface ChannelRowProps {
   guideFrom: string | undefined
   tuned: boolean
   elapsedSeconds: number
+  shelf: GuideShelf | undefined
 }
 
 function ChannelRow({
@@ -68,6 +80,7 @@ function ChannelRow({
   guideFrom,
   tuned,
   elapsedSeconds,
+  shelf,
 }: ChannelRowProps) {
   const { now, next } = channel
   return (
@@ -95,6 +108,10 @@ function ChannelRow({
           offset={advanceOffset(now.offset, now.duration, elapsedSeconds)}
           duration={now.duration}
         />
+      )}
+
+      {now === null || shelf === undefined || now.artist !== undefined ? null : (
+        <SaveToShelf channel={channel.id} airing={now} shelf={shelf} />
       )}
 
       {next === null ? null : (
@@ -140,6 +157,31 @@ function NowAiring({ title, offset, duration }: NowAiringProps) {
       </div>
       <p className="channel__remaining">{remainingLabel(offset, duration)}</p>
     </>
+  )
+}
+
+interface SaveToShelfProps {
+  channel: string
+  airing: Airing
+  shelf: GuideShelf
+}
+
+/** Keeps what is on for later, on channel 0's On Demand shelf. */
+function SaveToShelf({ channel, airing, shelf }: SaveToShelfProps) {
+  if (shelf.keys.has(`${channel}/${airing.id}`)) {
+    return <p className="channel__shelved">On the On Demand shelf</p>
+  }
+  return (
+    <button
+      type="button"
+      className="button channel__save"
+      disabled={shelf.busy}
+      onClick={() => {
+        shelf.add(channel, airing)
+      }}
+    >
+      Save to On Demand
+    </button>
   )
 }
 

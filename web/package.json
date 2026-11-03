@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "The read-only Channel Three guide page, built into the Go binary.",
+  "description": "The Channel Three guide page and On Demand shelf, built into the Go binary.",
   "scripts": {
     "dev": "vite build --watch",
     "build": "vite build",

@@ -286,7 +286,366 @@ body {
   font-size: 0.95rem;
 }
 
+/* Tabs: the guide and the On Demand shelf. */
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  order: 3;
+  width: 100%;
+}
+
+.tabs__tab {
+  flex: 1;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: var(--muted);
+  font-weight: 600;
+  text-align: center;
+  text-decoration: none;
+}
+
+.tabs__tab[aria-current='page'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.tabs__tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Buttons and fields, sized for a thumb. */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.button:disabled,
+.button--disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.button:focus-visible,
+.button:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.button--primary,
+.button--on {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.button--quiet {
+  background: transparent;
+  color: var(--accent-text);
+}
+
+.button--danger {
+  color: #ff8a80;
+}
+
+@media (prefers-color-scheme: light) {
+  .button--danger {
+    color: #b3261e;
+  }
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.field--grow {
+  flex: 1 1 12rem;
+}
+
+.field__label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.input,
+.select {
+  min-height: 2.75rem;
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.dock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  max-width: 62rem;
+  margin: 0 auto;
+  padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom));
+  display: grid;
+  gap: 0.5rem;
+}
+
+.dock__notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0;
+  color: var(--text);
+  box-shadow: 0 0.25rem 1.5rem rgb(0 0 0 / 0.45);
+}
+
+.pin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem;
+  box-shadow: 0 0.25rem 1.5rem rgb(0 0 0 / 0.45);
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.75rem;
+  background: var(--surface-raised);
+}
+
+/* Saving what is on from the guide. */
+
+.channel__save {
+  margin-top: 0.75rem;
+}
+
+.channel__shelved {
+  margin: 0.75rem 0 0;
+  color: var(--accent-text);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+/* The On Demand tab. */
+
+.ondemand__intro {
+  margin: 0 0 1rem;
+  color: var(--muted);
+}
+
+.section {
+  margin: 0 0 2rem;
+}
+
+.section__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0 0 0.75rem;
+}
+
+.section__title {
+  margin: 0 0 0.75rem;
+  font-size: 1.2rem;
+}
+
+.section__head .section__title {
+  margin: 0;
+}
+
+.shelf,
+.folder__items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.folder,
+.shelf > li > .item {
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--surface);
+}
+
+.folder {
+  border-left: 6px solid var(--accent);
+}
+
+.folder__items {
+  margin-top: 0.75rem;
+  padding-left: 0.6rem;
+  border-left: 1px solid var(--border);
+  gap: 0.6rem;
+}
+
+.folder__empty {
+  margin: 0.75rem 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+/* The whole row opens its edit panel, so the title gets the width a button
+   beside it would take. */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 0.4rem;
+}
+
+.row__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.row__title {
+  display: block;
+  font-weight: 600;
+  overflow-wrap: break-word;
+}
+
+.row__meta {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.row__edit {
+  flex: none;
+  align-self: flex-start;
+  color: var(--accent-text);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.cover {
+  flex: none;
+  width: 6rem;
+  aspect-ratio: 16 / 9;
+  border-radius: 0.4rem;
+  object-fit: cover;
+  background: var(--track);
+}
+
+.cover--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.65rem;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.actions .field {
+  flex: 1 1 10rem;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0 0 0.75rem;
+}
+
+.library__channel {
+  margin-top: 0;
+}
+
+.library__count {
+  color: var(--muted);
+}
+
+.library__list {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+}
+
+.library__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.4rem 0.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.library__title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.library__duration {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.library__item .button {
+  flex: none;
+  min-width: 7.5rem;
+}
+
 @media (min-width: 900px) {
+  .tabs {
+    order: 0;
+    width: auto;
+  }
+
+  .tabs__tab {
+    flex: none;
+  }
+
   .channels {
     grid-template-columns: 1fr 1fr;
   }
