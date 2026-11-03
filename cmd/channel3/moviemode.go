@@ -17,16 +17,19 @@ import (
 	"github.com/tylersavery/channel3/internal/input"
 	"github.com/tylersavery/channel3/internal/movie"
 	"github.com/tylersavery/channel3/internal/player"
+	"github.com/tylersavery/channel3/internal/shelf"
 )
 
-// Movie Mode is the one place Channel Three has controls. Channel 0 asks for
-// the code, then shows a menu of the prepared movies; a movie plays with
-// pause, seek, subtitles and audio on the number keys. Channel up and down
-// do nothing while a movie plays. Leaving tunes back to the channel that was
-// on, which has carried on by the clock all along.
+// Movie Mode, which the menu calls On Demand, is the one place Channel Three
+// has controls. Channel 0 asks for the code, then shows a menu: the prepared
+// movies, and the episodes on the shelf, alone or in a folder per show. What
+// is picked plays with pause, seek, subtitles and audio on the number keys.
+// Channel up and down do nothing while it plays. Leaving tunes back to the
+// channel that was on, which has carried on by the clock all along.
 //
-// Where each movie was stopped is kept in one small file so it can offer to
-// resume, which is the one piece of playback state the owner chose to keep.
+// Where each movie or episode was stopped is kept in one small file so it
+// can offer to resume, which is the one piece of playback state the owner
+// chose to keep.
 
 // movieOverlay is the overlay id Movie Mode's screens are drawn under, above
 // the bumper and the guide.
@@ -57,11 +60,14 @@ var seeks = map[int]time.Duration{
 	7: -5 * time.Minute, 9: 5 * time.Minute,
 }
 
-// movieShelf is where Movie Mode finds its movies and keeps its positions.
+// movieShelf is where Movie Mode finds its movies and episodes, and keeps
+// where each was stopped.
 type movieShelf struct {
 	dir       string
 	positions string
 	pin       string
+	episodes  *shelf.Store
+	covers    shelf.Covers
 }
 
 func newMovieShelf(root, pin string) *movieShelf {
@@ -69,8 +75,105 @@ func newMovieShelf(root, pin string) *movieShelf {
 		dir:       moviesDir(root),
 		positions: filepath.Join(root, "movie-positions.json"),
 		pin:       pin,
+		episodes:  shelf.NewStore(root),
+		covers:    shelf.Covers{Dir: shelf.CoversDir(root)},
 	}
 }
+
+// playable is a movie or an episode, ready to play.
+type playable struct {
+	name string
+	path string
+	// key is where it is kept in the positions file: a movie's file name, or
+	// an episode's channel/id.
+	key    string
+	length time.Duration
+	gain   float64
+	// movie carries a movie's tracks and interlacing. An episode has none
+	// recorded, so its audio is its first track and it has no subtitles.
+	movie   movie.Movie
+	episode bool
+}
+
+// tile is one place on the menu: something to play, or a folder of them.
+type tile struct {
+	title  string
+	detail string
+	// The picture is a movie's poster, a shelf cover (a folder falls back to
+	// its first episode's), or for the Movies folder a strip of posters.
+	poster   *movie.Movie
+	cover    string
+	fallback string
+	strip    []movie.Movie
+
+	play   *playable
+	folder *level
+}
+
+// level is one screen of the menu: the top, or inside a folder.
+type level struct {
+	title string
+	wide  bool
+	tiles []tile
+}
+
+// buildMenu lays the menu out. With nothing on the shelf it is the movies,
+// as Movie Mode has always been. With something, the top is ON DEMAND: a
+// Movies folder first, then the shelf in its own order.
+func buildMenu(movies []movie.Movie, dir string, shown []shelf.Shown) *level {
+	movieTiles := make([]tile, 0, len(movies))
+	for _, m := range movies {
+		movieTiles = append(movieTiles, tile{title: m.Name(), poster: &m, play: &playable{
+			name: m.Name(), path: filepath.Join(dir, m.File), key: m.File,
+			length: seconds(m.Duration), gain: m.Gain(), movie: m,
+		}})
+	}
+	if len(shown) == 0 {
+		return &level{title: "MOVIE NIGHT", tiles: movieTiles}
+	}
+
+	top := &level{title: "ON DEMAND", wide: true}
+	if len(movies) > 0 {
+		top.tiles = append(top.tiles, tile{
+			title: "Movies", detail: count(len(movies), "movie"), strip: movies[:min(len(movies), 3)],
+			folder: &level{title: "MOVIE NIGHT", tiles: movieTiles},
+		})
+	}
+	episode := func(v shelf.Video) tile {
+		key := shelf.ItemKey(v.Ref())
+		return tile{title: v.Title, cover: key, play: &playable{
+			name: v.Title, path: v.Video.Path, key: key,
+			length: v.Video.Duration, gain: v.Video.Gain, episode: true,
+		}}
+	}
+	for _, e := range shown {
+		if e.Video != nil {
+			top.tiles = append(top.tiles, episode(*e.Video))
+			continue
+		}
+		inside := &level{title: strings.ToUpper(e.Folder.Name), wide: true}
+		for _, v := range e.Folder.Videos {
+			inside.tiles = append(inside.tiles, episode(v))
+		}
+		top.tiles = append(top.tiles, tile{
+			title: e.Folder.Name, detail: count(len(e.Folder.Videos), "episode"),
+			cover: shelf.FolderKey(e.Folder.ID), fallback: inside.tiles[0].cover,
+			folder: inside,
+		})
+	}
+	return top
+}
+
+// count writes "1 movie" or "6 episodes".
+func count(n int, thing string) string {
+	if n == 1 {
+		return "1 " + thing
+	}
+	return strconv.Itoa(n) + " " + thing + "s"
+}
+
+// seconds turns a sidecar's seconds into a duration.
+func seconds(f float64) time.Duration { return time.Duration(f * float64(time.Second)) }
 
 // movieScreen is where in Movie Mode the viewer is.
 type movieScreen int
@@ -99,15 +202,19 @@ type cinema struct {
 	// the menu's idle time, The End's moment.
 	deadline time.Time
 
-	movies  []movie.Movie
-	posters map[string]image.Image
-	page    int
+	// top is the menu; inside is the folder open, or nil at the top. page
+	// is the page of whichever is showing, and topPage the top's while a
+	// folder is open.
+	top      *level
+	inside   *level
+	page     int
+	topPage  int
+	pictures map[string]image.Image
 
-	// chosen is the movie picked, an index into movies; resumeAt is where it
-	// was stopped.
-	chosen   int
+	// playing is what was picked; resumeAt is where it was stopped.
+	playing  *playable
 	resumeAt time.Duration
-	// path, audio, subtitle and paused are the movie playing. audio and
+	// path, audio, subtitle and paused are what is playing. audio and
 	// subtitle are mpv's track numbers; a subtitle of 0 is off.
 	path     string
 	audio    int
@@ -197,6 +304,14 @@ func (s *station) pinKey(k input.Key) {
 	s.enterMenu()
 }
 
+// level is the menu screen showing: a folder, or the top.
+func (c *cinema) level() *level {
+	if c.inside != nil {
+		return c.inside
+	}
+	return c.top
+}
+
 // enterMenu takes the screen from the broadcast and shows the menu.
 func (s *station) enterMenu() {
 	c := s.cinema
@@ -207,8 +322,15 @@ func (s *station) enterMenu() {
 	for _, e := range skipped {
 		s.log.Warn("leaving a movie off the menu", "error", e)
 	}
-	c.movies = movies
-	c.posters = make(map[string]image.Image)
+	var shown []shelf.Shown
+	if picked, err := s.shelf.episodes.Read(); err != nil {
+		s.log.Error("could not read the shelf; showing the movies alone", "error", err)
+	} else {
+		shown = shelf.Playable(picked, shelf.NewLibrary(s.PlayableChannels()))
+	}
+	c.top = buildMenu(movies, s.shelf.dir, shown)
+	c.inside, c.page, c.topPage = nil, 0, 0
+	c.pictures = make(map[string]image.Image)
 
 	// The channel's own pieces come down, and the stand by card goes under
 	// the menu so nothing is heard behind it.
@@ -220,7 +342,7 @@ func (s *station) enterMenu() {
 		}
 	}
 	s.standbyOrLog()
-	s.log.Info("movie mode: menu", "movies", len(movies))
+	s.log.Info("movie mode: menu", "movies", len(movies), "on the shelf", len(shown))
 	s.showMenu()
 }
 
@@ -233,13 +355,14 @@ func (s *station) showMenu() {
 	s.drawMovies()
 }
 
-// menuKey picks a movie by number or turns the page.
+// menuKey picks by number, turns the page, or goes back.
 func (s *station) menuKey(k input.Key) {
 	c := s.cinema
 	c.deadline = s.now().Add(menuIdle)
+	lvl := c.level()
 	switch k.Action {
 	case input.ChannelUp, input.ChannelDown:
-		pages := menuPages(len(c.movies))
+		pages := menuPages(len(lvl.tiles), lvl.wide)
 		step := 1
 		if k.Action == input.ChannelDown {
 			step = pages - 1
@@ -249,11 +372,16 @@ func (s *station) menuKey(k input.Key) {
 		s.drawMovies()
 	case input.Digit:
 		if c.typed == "" && k.Digit == 0 {
+			if c.inside != nil {
+				c.inside, c.page = nil, c.topPage
+				s.drawMovies()
+				return
+			}
 			s.closeMovies("back to TV")
 			return
 		}
 		c.typed += strconv.Itoa(k.Digit)
-		if longerMovieNumber(c.typed, len(c.movies)) {
+		if longerMovieNumber(c.typed, len(lvl.tiles)) {
 			c.digitsAt = s.now().Add(s.movieDigitWait())
 			s.drawMovies()
 			return
@@ -283,29 +411,38 @@ func longerMovieNumber(typed string, count int) bool {
 	return false
 }
 
-// commitMovieNumber picks the movie typed, if there is one with that number.
+// commitMovieNumber opens or plays what was typed, if there is something
+// with that number.
 func (s *station) commitMovieNumber() {
 	c := s.cinema
 	n, _ := strconv.Atoi(c.typed)
 	c.typed, c.digitsAt = "", time.Time{}
-	if n < 1 || n > len(c.movies) {
-		s.log.Info("movie mode: no movie has that number", "number", n)
+	tiles := c.level().tiles
+	if n < 1 || n > len(tiles) {
+		s.log.Info("movie mode: nothing has that number", "number", n)
 		s.drawMovies()
 		return
 	}
-	s.chooseMovie(n - 1)
+	t := tiles[n-1]
+	if t.folder != nil {
+		s.log.Info("movie mode: folder", "folder", t.title)
+		c.inside, c.topPage, c.page = t.folder, c.page, 0
+		s.drawMovies()
+		return
+	}
+	s.chooseMovie(t.play)
 }
 
-// chooseMovie plays a movie, or asks first when it was stopped partway.
-func (s *station) chooseMovie(i int) {
+// chooseMovie plays a movie or episode, or asks first when it was stopped
+// partway.
+func (s *station) chooseMovie(p *playable) {
 	c := s.cinema
-	m := c.movies[i]
-	c.chosen = i
+	c.playing = p
 	positions, err := movie.ReadPositions(s.shelf.positions)
 	if err != nil {
 		s.log.Warn("could not read where movies were stopped; starting from the beginning", "error", err)
 	}
-	if at := positions.ResumeAt(m.File, time.Duration(m.Duration*float64(time.Second))); at > 0 {
+	if at := positions.ResumeAt(p.key, p.length); at > 0 {
 		c.screen, c.resumeAt = screenResume, at
 		c.deadline = s.now().Add(menuIdle)
 		s.drawMovies()
@@ -329,25 +466,25 @@ func (s *station) resumeKey(k input.Key) {
 	}
 }
 
-// startMovie plays the chosen movie from offset.
+// startMovie plays what was picked from offset.
 func (s *station) startMovie(offset time.Duration) {
 	c := s.cinema
-	m := c.movies[c.chosen]
-	c.path = filepath.Join(s.shelf.dir, m.File)
+	p := c.playing
+	c.path = p.path
 	c.audio = 0
-	if len(m.Audio) > 0 {
+	if len(p.movie.Audio) > 0 || p.episode {
 		c.audio = 1
 	}
-	c.subtitle = defaultSubtitle(m)
+	c.subtitle = defaultSubtitle(p.movie)
 	c.paused = false
 	c.lastPos = offset
 	c.deadline = time.Time{}
 
-	if err := s.player.SetGain(m.Gain()); err != nil {
-		s.log.Warn("could not set the movie's loudness correction", "movie", m.Name(), "error", err)
+	if err := s.player.SetGain(p.gain); err != nil {
+		s.log.Warn("could not set the loudness correction", "playing", p.name, "error", err)
 	}
-	if err := s.loadMovie(m, offset); err != nil {
-		s.log.Error("could not start a movie", "movie", m.Name(), "error", err)
+	if err := s.loadMovie(offset); err != nil {
+		s.log.Error("could not start playing", "playing", p.name, "error", err)
 		s.showMenu()
 		return
 	}
@@ -355,14 +492,15 @@ func (s *station) startMovie(offset time.Duration) {
 	if err := s.player.RemoveOverlay(movieOverlay); err != nil {
 		s.log.Warn("could not take the movie screen down", "error", err)
 	}
-	s.log.Info("movie mode: playing", "movie", m.Name(), "from", offset.Round(time.Second),
+	s.log.Info("movie mode: playing", "playing", p.name, "from", offset.Round(time.Second),
 		"audio", c.audio, "subtitles", c.subtitle)
 	s.showProgress(offset, controlShown)
 }
 
-// loadMovie hands the playing movie to mpv at offset with its tracks.
-func (s *station) loadMovie(m movie.Movie, offset time.Duration) error {
+// loadMovie hands what is playing to mpv at offset with its tracks.
+func (s *station) loadMovie(offset time.Duration) error {
 	c := s.cinema
+	m := c.playing.movie
 	return s.player.LoadMovie(c.path, offset, player.MovieOptions{
 		Audio:       c.audio,
 		Subtitle:    subtitleTrack(m, c.subtitle),
@@ -417,7 +555,8 @@ func (s *station) playingKey(k input.Key) {
 		// Channel up and down do nothing during a movie.
 		return
 	}
-	m := c.movies[c.chosen]
+	p := c.playing
+	m := p.movie
 	switch d := k.Digit; {
 	case d == 5:
 		c.paused = !c.paused
@@ -431,10 +570,12 @@ func (s *station) playingKey(k input.Key) {
 			s.log.Warn("could not seek", "by", seeks[d], "error", err)
 			return
 		}
-		length := time.Duration(m.Duration * float64(time.Second))
-		target = min(max(target, 0), length)
+		target = min(max(target, 0), p.length)
 		c.lastPos = target
 		s.showProgress(target, s.progressFor())
+	case (d == 8 || d == 2) && p.episode:
+		// An episode's tracks are not recorded, and a video from the web
+		// has one of each at most, so there is nothing to change.
 	case d == 8:
 		c.subtitle = nextSubtitle(m, c.subtitle)
 		if err := s.player.SetTrack(player.SubtitleTrack, subtitleTrack(m, c.subtitle)); err != nil {
@@ -457,7 +598,7 @@ func (s *station) playingKey(k input.Key) {
 		s.showText("Audio: "+trackLabel(m.Audio, c.audio), controlShown, volumeScale)
 	case d == 0:
 		s.saveMoviePosition()
-		s.log.Info("movie mode: stopped", "movie", m.Name(), "at", c.lastPos.Round(time.Second))
+		s.log.Info("movie mode: stopped", "playing", p.name, "at", c.lastPos.Round(time.Second))
 		s.showText("", time.Millisecond, volumeScale)
 		s.standbyOrLog()
 		s.showMenu()
@@ -496,8 +637,7 @@ func (s *station) moviePosition() time.Duration {
 // showProgress puts the time and a bar up, in the channel number's green.
 func (s *station) showProgress(at, d time.Duration) {
 	c := s.cinema
-	m := c.movies[c.chosen]
-	length := time.Duration(m.Duration * float64(time.Second))
+	length := c.playing.length
 	state := "▶"
 	if c.paused {
 		state = "II"
@@ -532,23 +672,24 @@ func (s *station) saveMoviePosition() {
 		return
 	}
 	at := s.moviePosition()
-	s.writePosition(c.movies[c.chosen].File, at)
+	s.writePosition(c.playing.key, at)
 }
 
-// writePosition records where a movie is, or forgets it when at is zero.
-func (s *station) writePosition(file string, at time.Duration) {
+// writePosition records where a movie or episode is, under its key, or
+// forgets it when at is zero.
+func (s *station) writePosition(key string, at time.Duration) {
 	positions, err := movie.ReadPositions(s.shelf.positions)
 	if err != nil {
 		s.log.Warn("could not read where movies were stopped; starting the file afresh", "error", err)
 		positions = movie.Positions{}
 	}
 	if at > 0 {
-		positions[file] = at
+		positions[key] = at
 	} else {
-		delete(positions, file)
+		delete(positions, key)
 	}
 	if err := positions.Write(s.shelf.positions); err != nil {
-		s.log.Warn("could not write down where the movie is", "file", file, "error", err)
+		s.log.Warn("could not write down where the movie is", "key", key, "error", err)
 	}
 }
 
@@ -560,12 +701,11 @@ func (s *station) movieEvent(ev player.Event) {
 		s.log.Warn("mpv restarted during movie mode")
 		s.applyVolume()
 		if c.screen == screenPlaying {
-			m := c.movies[c.chosen]
-			if err := s.player.SetGain(m.Gain()); err != nil {
-				s.log.Warn("could not set the movie's loudness correction", "error", err)
+			if err := s.player.SetGain(c.playing.gain); err != nil {
+				s.log.Warn("could not set the loudness correction", "error", err)
 			}
 			c.paused = false
-			if err := s.loadMovie(m, c.lastPos); err != nil {
+			if err := s.loadMovie(c.lastPos); err != nil {
 				s.log.Error("could not reload the movie after mpv restarted", "error", err)
 			}
 			return
@@ -577,15 +717,15 @@ func (s *station) movieEvent(ev player.Event) {
 		if c.screen != screenPlaying || (ev.Path != "" && ev.Path != c.path) {
 			return
 		}
-		m := c.movies[c.chosen]
+		p := c.playing
 		if ev.Reason == player.ReasonError {
-			s.log.Error("a movie would not play", "movie", m.Name(), "path", c.path)
+			s.log.Error("a movie would not play", "playing", p.name, "path", c.path)
 			s.standbyOrLog()
 			s.showMenu()
 			return
 		}
-		s.log.Info("movie mode: the end", "movie", m.Name())
-		s.writePosition(m.File, 0)
+		s.log.Info("movie mode: the end", "playing", p.name)
+		s.writePosition(p.key, 0)
 		s.standbyOrLog()
 		c.screen = screenEnded
 		c.deadline = s.now().Add(theEndShown)
@@ -655,12 +795,10 @@ func (s *station) drawMovies() {
 	case screenMenu:
 		img, err = bumper.RenderMenu(s.menuPage(), w, h)
 	case screenResume:
-		m := c.movies[c.chosen]
-		img, err = bumper.RenderNotice("MOVIE NIGHT", m.Name(),
+		img, err = bumper.RenderNotice(c.level().title, c.playing.name,
 			[]string{"1   Resume from " + clockTime(c.resumeAt), "2   Start over"}, "0 for the menu", w, h)
 	case screenEnded:
-		m := c.movies[c.chosen]
-		img, err = bumper.RenderNotice("MOVIE NIGHT", "The End", []string{m.Name()}, "", w, h)
+		img, err = bumper.RenderNotice(c.level().title, "The End", []string{c.playing.name}, "", w, h)
 	}
 	if err != nil {
 		s.log.Warn("could not draw the movie screen", "screen", c.screen, "error", err)
@@ -671,23 +809,74 @@ func (s *station) drawMovies() {
 	}
 }
 
-// menuPages is how many pages count movies fill.
-func menuPages(count int) int {
-	return max((count+bumper.MoviesPerPage-1)/bumper.MoviesPerPage, 1)
+// menuPages is how many pages count tiles fill.
+func menuPages(count int, wide bool) int {
+	per := bumper.PerPage(wide)
+	return max((count+per-1)/per, 1)
 }
 
-// menuPage is the menu's current page, with its posters.
+// menuPage is the menu's current page, with its pictures.
 func (s *station) menuPage() bumper.MenuPage {
 	c := s.cinema
-	pages := menuPages(len(c.movies))
+	lvl := c.level()
+	pages := menuPages(len(lvl.tiles), lvl.wide)
 	c.page %= pages
-	page := bumper.MenuPage{Page: c.page + 1, Pages: pages, Typed: c.typed}
-	first := c.page * bumper.MoviesPerPage
-	for i := first; i < min(first+bumper.MoviesPerPage, len(c.movies)); i++ {
-		m := c.movies[i]
-		page.Movies = append(page.Movies, bumper.MenuMovie{Number: i + 1, Title: m.Name(), Poster: s.poster(m)})
+	page := bumper.MenuPage{Title: lvl.title, Wide: lvl.wide, Back: c.inside != nil,
+		Page: c.page + 1, Pages: pages, Typed: c.typed}
+	per := bumper.PerPage(lvl.wide)
+	first := c.page * per
+	for i := first; i < min(first+per, len(lvl.tiles)); i++ {
+		t := lvl.tiles[i]
+		page.Tiles = append(page.Tiles, bumper.MenuTile{Number: i + 1, Title: t.title, Detail: t.detail, Picture: s.picture(t)})
 	}
 	return page
+}
+
+// picture is a tile's picture, read once per visit to the menu. One that
+// will not read leaves a plain tile with the title.
+func (s *station) picture(t tile) image.Image {
+	switch {
+	case t.poster != nil:
+		return s.poster(*t.poster)
+	case t.strip != nil:
+		c := s.cinema
+		if img, ok := c.pictures["strip"]; ok {
+			return img
+		}
+		var posters []image.Image
+		for _, m := range t.strip {
+			if img := s.poster(m); img != nil {
+				posters = append(posters, img)
+			}
+		}
+		var img image.Image
+		if len(posters) > 0 {
+			img = bumper.Strip(posters, 960, 540)
+		}
+		c.pictures["strip"] = img
+		return img
+	case t.cover != "":
+		if img := s.cover(t.cover); img != nil || t.fallback == "" {
+			return img
+		}
+		return s.cover(t.fallback)
+	}
+	return nil
+}
+
+// cover reads a shelf cover once per visit to the menu.
+func (s *station) cover(key string) image.Image {
+	c := s.cinema
+	if img, ok := c.pictures[key]; ok {
+		return img
+	}
+	img, err := s.shelf.covers.Load(key)
+	if err != nil {
+		s.log.Warn("could not read a cover", "key", key, "error", err)
+		img = nil
+	}
+	c.pictures[key] = img
+	return img
 }
 
 // poster reads a movie's poster once per visit to the menu. A poster that
@@ -697,7 +886,7 @@ func (s *station) poster(m movie.Movie) image.Image {
 	if m.Poster == "" {
 		return nil
 	}
-	if img, ok := c.posters[m.Poster]; ok {
+	if img, ok := c.pictures[m.Poster]; ok {
 		return img
 	}
 	var img image.Image
@@ -710,6 +899,6 @@ func (s *station) poster(m movie.Movie) image.Image {
 		s.log.Warn("could not read a movie's poster", "movie", m.Name(), "error", err)
 		img = nil
 	}
-	c.posters[m.Poster] = img
+	c.pictures[m.Poster] = img
 	return img
 }

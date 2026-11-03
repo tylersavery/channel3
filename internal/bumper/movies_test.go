@@ -41,14 +41,21 @@ func solid(w, h int, c color.RGBA) image.Image {
 func TestRenderMovieScreens(t *testing.T) {
 	poster := solid(600, 900, color.RGBA{0xC0, 0x40, 0x30, 0xff})
 	frame := solid(1920, 1080, color.RGBA{0x30, 0x80, 0xC0, 0xff})
-	page := MenuPage{Page: 1, Pages: 2, Movies: []MenuMovie{
-		{Number: 1, Title: "The Iron Giant (1999)", Poster: poster},
-		{Number: 2, Title: "My Neighbor Totoro (1988)", Poster: frame},
+	page := MenuPage{Page: 1, Pages: 2, Tiles: []MenuTile{
+		{Number: 1, Title: "The Iron Giant (1999)", Picture: poster},
+		{Number: 2, Title: "My Neighbor Totoro (1988)", Picture: frame},
 		{Number: 3, Title: "Ponyo"},
-		{Number: 4, Title: "Willy Wonka and the Chocolate Factory (1971)", Poster: frame},
-		{Number: 5, Title: "Up (2009)", Poster: poster},
-		{Number: 6, Title: "Paddington 2 (2017)", Poster: poster},
+		{Number: 4, Title: "Willy Wonka and the Chocolate Factory (1971)", Picture: frame},
+		{Number: 5, Title: "Up (2009)", Picture: poster},
+		{Number: 6, Title: "Paddington 2 (2017)", Picture: poster},
 		{Number: 12, Title: "Wall-E (2008)"},
+	}}
+	wide := MenuPage{Title: "ON DEMAND", Wide: true, Page: 1, Pages: 1, Tiles: []MenuTile{
+		{Number: 1, Title: "Movies", Detail: "2 movies", Picture: Strip([]image.Image{poster, frame}, 1600, 900)},
+		{Number: 2, Title: "Tractor Ted", Detail: "6 episodes", Picture: frame},
+		{Number: 3, Title: "Telly and the Fire Bell"},
+		{Number: 4, Title: "Let's Roll! Summer Fun with Tractor Ted and Some Friends", Picture: poster},
+		{Number: 5, Title: "Elmo's World", Picture: frame},
 	}}
 	for _, size := range []image.Point{{1280, 720}, {1920, 1080}} {
 		menu, err := RenderMenu(page, size.X, size.Y)
@@ -59,6 +66,15 @@ func TestRenderMovieScreens(t *testing.T) {
 			t.Errorf("menu is %v, want %v", menu.Bounds().Size(), size)
 		}
 		savePreview(t, "menu-"+itoa(size.Y), menu)
+
+		wideMenu, err := RenderMenu(wide, size.X, size.Y)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if wideMenu.Bounds().Size() != size {
+			t.Errorf("wide menu is %v, want %v", wideMenu.Bounds().Size(), size)
+		}
+		savePreview(t, "wide-"+itoa(size.Y), wideMenu)
 	}
 
 	pin, err := RenderPIN(2, 4, 1280, 720)

@@ -17,28 +17,51 @@ import (
 // Movie Mode's screens share the guide's look: the night background, the
 // retro green and the same fonts, so the two feel like one television.
 
-// MenuMovie is one film on the menu.
-type MenuMovie struct {
+// MenuTile is one place on the On Demand menu: a movie, an episode, or a
+// folder of them.
+type MenuTile struct {
 	Number int
 	Title  string
-	// Poster is the film's picture, or nil for a plain tile with the title.
-	Poster image.Image
+	// Detail is a short line under the title, a folder's "6 episodes".
+	Detail string
+	// Picture is the poster or cover, or nil for a plain tile with the title.
+	Picture image.Image
 }
 
-// MenuPage is one screen of the movie menu.
+// MenuPage is one screen of the menu.
 type MenuPage struct {
-	Movies      []MenuMovie
+	// Title heads the screen: ON DEMAND, MOVIE NIGHT, or a folder's name.
+	Title string
+	Tiles []MenuTile
+	// Wide draws 16:9 covers, three across and two down, rather than 2:3
+	// posters, five across and two down.
+	Wide bool
+	// Back says the menu is inside a folder, so 0 goes back up rather than
+	// back to TV.
+	Back        bool
 	Page, Pages int
-	// Typed is a half typed movie number, shown until it is complete.
+	// Typed is a half typed number, shown until it is complete.
 	Typed string
 }
 
-// MenuColumns and MenuRows are how many posters fit on one page.
+// The grids: how many posters or covers fit on one page.
 const (
 	MenuColumns   = 5
 	MenuRows      = 2
 	MoviesPerPage = MenuColumns * MenuRows
+
+	WideColumns = 3
+	WideRows    = 2
+	WidePerPage = WideColumns * WideRows
 )
+
+// PerPage is how many tiles one page of the kind holds.
+func PerPage(wide bool) int {
+	if wide {
+		return WidePerPage
+	}
+	return MoviesPerPage
+}
 
 var (
 	posterTile = color.RGBA{0x24, 0x31, 0x5C, 0xff}
@@ -98,7 +121,7 @@ func (s *screen) centred(face font.Face, text string, y int, c color.Color) {
 
 // RenderPIN draws the code screen with typed of length digits entered.
 func RenderPIN(typed, length, width, height int) (*image.RGBA, error) {
-	s, err := newScreen("MOVIE NIGHT", "Enter the code to watch a movie", "", width, height)
+	s, err := newScreen("ON DEMAND", "Enter the code to pick something to watch", "", width, height)
 	if err != nil {
 		return nil, err
 	}
@@ -143,52 +166,80 @@ func RenderNotice(title, headline string, lines []string, hint string, width, he
 	return s.img, nil
 }
 
-// RenderMenu draws one page of the movie menu: a grid of posters, each with
-// its number, and the title under it.
+// RenderMenu draws one page of the menu: a grid of pictures, each with its
+// number, and the title under it.
 func RenderMenu(page MenuPage, width, height int) (*image.RGBA, error) {
 	right := ""
 	if page.Pages > 1 {
 		right = fmt.Sprintf("Ch ▲▼ more  ·  %d / %d", page.Page, page.Pages)
 	}
-	hint := "Press a movie's number  ·  0 to go back to TV"
-	if page.Typed != "" {
-		hint = "Movie " + page.Typed + "-"
+	hint := "Press a number  ·  0 to go back to TV"
+	if page.Back {
+		hint = "Press a number  ·  0 to go back"
 	}
-	s, err := newScreen("MOVIE NIGHT", hint, right, width, height)
+	if page.Typed != "" {
+		hint = "Number " + page.Typed + "-"
+	}
+	title := page.Title
+	if title == "" {
+		title = "MOVIE NIGHT"
+	}
+	s, err := newScreen(title, hint, right, width, height)
 	if err != nil {
 		return nil, err
 	}
 	defer s.faces.close()
 
+	columns, rows := MenuColumns, MenuRows
+	if page.Wide {
+		columns, rows = WideColumns, WideRows
+	}
 	top := s.headerH + int(s.h*0.04)
 	bottom := height - s.footer - int(s.h*0.02)
 	gapX := int(s.w * 0.025)
-	cellW := (width - 2*s.margin - (MenuColumns-1)*gapX) / MenuColumns
-	cellH := (bottom - top) / MenuRows
-	titleH := int(float64(cellH) * 0.22)
-	// Posters are 2:3, as long as that fits the cell.
-	tileH := cellH - titleH - int(float64(cellH)*0.03)
-	tileW := min(cellW, tileH*2/3)
-	tileH = tileW * 3 / 2
+	cellW := (width - 2*s.margin - (columns-1)*gapX) / columns
+	cellH := (bottom - top) / rows
+	// A wide row is shorter, so its title and detail take more of it.
+	titleShare := 0.22
+	if page.Wide {
+		titleShare = 0.30
+	}
+	tileH := cellH - int(float64(cellH)*titleShare) - int(float64(cellH)*0.03)
+	var tileW int
+	if page.Wide {
+		// Covers are 16:9, as long as that fits the cell.
+		tileW = min(cellW, tileH*16/9)
+		tileH = tileW * 9 / 16
+	} else {
+		// Posters are 2:3, as long as that fits the cell.
+		tileW = min(cellW, tileH*2/3)
+		tileH = tileW * 3 / 2
+	}
 
-	numFace := s.faces.get(true, float64(tileW)*0.20)
-	titleFace := s.faces.get(true, float64(titleH)*0.30)
-	plainFace := s.faces.get(true, float64(tileW)*0.13)
+	// The badge and the type are sized from the tile's shorter side, so a
+	// wide cover's number is no bigger than a poster's.
+	side := min(tileW, tileH*2/3)
+	numFace := s.faces.get(true, float64(side)*0.20)
+	// Titles are the same size on both grids, the size the poster grid has
+	// always had.
+	titleFace := s.faces.get(true, s.h*0.0245)
+	detailFace := s.faces.get(false, s.h*0.021)
+	plainFace := s.faces.get(true, float64(side)*0.13)
 
-	for i, m := range page.Movies {
-		if i >= MoviesPerPage {
+	for i, m := range page.Tiles {
+		if i >= columns*rows {
 			break
 		}
-		col, row := i%MenuColumns, i/MenuColumns
+		col, row := i%columns, i/columns
 		cellX := s.margin + col*(cellW+gapX)
 		cx := cellX + (cellW-tileW)/2
 		cy := top + row*cellH
 
 		tile := image.NewRGBA(image.Rect(0, 0, tileW, tileH))
-		fillRoundedRect(tile, posterTile, float64(tileW)*0.06)
-		if m.Poster != nil {
-			cover(tile, m.Poster)
-			roundCorners(tile, float64(tileW)*0.06)
+		fillRoundedRect(tile, posterTile, float64(side)*0.06)
+		if m.Picture != nil {
+			cover(tile, m.Picture)
+			roundCorners(tile, float64(side)*0.06)
 		} else {
 			// No picture at all: the title, large, on the tile.
 			lines := wrap(plainFace, m.Title, tileW-tileW/6, 4)
@@ -201,27 +252,52 @@ func RenderMenu(page MenuPage, width, height int) (*image.RGBA, error) {
 		}
 		draw.Draw(s.img, image.Rect(cx, cy, cx+tileW, cy+tileH), tile, image.Point{}, draw.Over)
 
-		// The number sits in a badge at the poster's top left.
+		// The number sits in a badge at the picture's top left.
 		num := fmt.Sprint(m.Number)
-		badgeH := numFace.Metrics().Height.Ceil() + tileW/20
-		badgeW := max(font.MeasureString(numFace, num).Ceil()+tileW/8, badgeH)
+		badgeH := numFace.Metrics().Height.Ceil() + side/20
+		badgeW := max(font.MeasureString(numFace, num).Ceil()+side/8, badgeH)
 		badge := image.NewRGBA(image.Rect(0, 0, badgeW, badgeH))
 		fillRoundedRect(badge, guideBackground, float64(badgeH)*0.3)
 		drawText(badge, numFace, num, (badgeW-font.MeasureString(numFace, num).Ceil())/2, baselineIn(numFace, 0, badgeH), guideGreen)
-		bx, by := cx-tileW/24, cy-tileW/24
+		bx, by := cx-side/24, cy-side/24
 		draw.Draw(s.img, image.Rect(bx, by, bx+badgeW, by+badgeH), badge, image.Point{}, draw.Over)
 
 		lineH := titleFace.Metrics().Height.Ceil()
-		for j, line := range wrap(titleFace, m.Title, cellW, 2) {
+		lines := wrap(titleFace, m.Title, cellW, 2)
+		if m.Detail != "" {
+			lines = wrap(titleFace, m.Title, cellW, 1)
+		}
+		for j, line := range lines {
 			lx := cellX + (cellW-font.MeasureString(titleFace, line).Ceil())/2
 			drawText(s.img, titleFace, line, lx, cy+tileH+lineH*(j+1), guideWhite)
 		}
+		if m.Detail != "" {
+			dx := cellX + (cellW-font.MeasureString(detailFace, m.Detail).Ceil())/2
+			drawText(s.img, detailFace, m.Detail, dx, cy+tileH+lineH*2, guideDim)
+		}
 	}
-	if len(page.Movies) == 0 {
+	if len(page.Tiles) == 0 {
 		body := s.faces.get(false, s.h*0.05)
-		s.centred(body, "No movies yet", int(s.h*0.5), guideDim)
+		s.centred(body, "Nothing here yet", int(s.h*0.5), guideDim)
 	}
 	return s.img, nil
+}
+
+// Strip lays pictures side by side across one 16:9 picture, each cropped to
+// its share, which is how the Movies folder shows a few of its posters.
+func Strip(pictures []image.Image, width, height int) image.Image {
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	draw.Draw(img, img.Bounds(), image.NewUniform(posterTile), image.Point{}, draw.Src)
+	if len(pictures) == 0 {
+		return img
+	}
+	for i, p := range pictures {
+		x0, x1 := width*i/len(pictures), width*(i+1)/len(pictures)
+		part := image.NewRGBA(image.Rect(0, 0, x1-x0, height))
+		cover(part, p)
+		draw.Draw(img, image.Rect(x0, 0, x1, height), part, image.Point{}, draw.Src)
+	}
+	return img
 }
 
 // cover scales src to fill dst, cropping whatever overhangs evenly from both

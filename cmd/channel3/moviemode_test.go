@@ -14,6 +14,7 @@ import (
 	"github.com/tylersavery/channel3/internal/movie"
 	"github.com/tylersavery/channel3/internal/player"
 	"github.com/tylersavery/channel3/internal/schedule"
+	"github.com/tylersavery/channel3/internal/shelf"
 )
 
 const testPIN = "6635"
@@ -375,11 +376,11 @@ func TestMenuPages(t *testing.T) {
 	}
 	s, _, _, _ := movieStation(t, keyChannels(), movies...)
 	press(s, "0"+testPIN)
-	if page := s.menuPage(); page.Pages != 2 || len(page.Movies) != 10 {
-		t.Fatalf("page %d of %d with %d movies", page.Page, page.Pages, len(page.Movies))
+	if page := s.menuPage(); page.Pages != 2 || len(page.Tiles) != 10 || page.Wide || page.Title != "MOVIE NIGHT" {
+		t.Fatalf("page %d of %d with %d movies, wide %v, %q", page.Page, page.Pages, len(page.Tiles), page.Wide, page.Title)
 	}
 	s.key(input.Key{Action: input.ChannelUp})
-	if page := s.menuPage(); page.Page != 2 || len(page.Movies) != 2 || page.Movies[0].Number != 11 {
+	if page := s.menuPage(); page.Page != 2 || len(page.Tiles) != 2 || page.Tiles[0].Number != 11 {
 		t.Errorf("second page %+v", page)
 	}
 	s.key(input.Key{Action: input.ChannelUp})
@@ -412,5 +413,129 @@ func TestProgressText(t *testing.T) {
 	}
 	if got := progressBar(2*time.Hour, time.Hour); got != strings.Repeat("█", 24) {
 		t.Errorf("past the end: %q", got)
+	}
+}
+
+// putOnShelf saves entries as the shelf under root.
+func putOnShelf(t *testing.T, root string, entries ...shelf.Entry) {
+	t.Helper()
+	if _, err := shelf.NewStore(root).Write(shelf.Shelf{Entries: entries}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// shelfStation is a movie station with Up, and on the shelf Doc One on its
+// own and a Clips folder holding Clip B, Clip A and a video that has gone.
+func shelfStation(t *testing.T) (*station, *fakePlayer, *fakeClock, string) {
+	t.Helper()
+	s, p, clock, root := movieStation(t, keyChannels(), upMovie())
+	putOnShelf(t, root,
+		shelf.Entry{Item: &shelf.Item{Channel: "docs", ID: "d1", Title: "The Doc"}},
+		shelf.Entry{Folder: &shelf.Folder{Name: "Clips", Items: []shelf.Item{
+			{Channel: "clips", ID: "b"}, {Channel: "clips", ID: "a"}, {Channel: "clips", ID: "gone"},
+		}}},
+	)
+	return s, p, clock, root
+}
+
+func TestOnDemandMenu(t *testing.T) {
+	s, _, _, _ := shelfStation(t)
+	press(s, "0"+testPIN)
+	page := s.menuPage()
+	if page.Title != "ON DEMAND" || !page.Wide || page.Back {
+		t.Errorf("top %q wide %v back %v", page.Title, page.Wide, page.Back)
+	}
+	var titles []string
+	for _, tile := range page.Tiles {
+		titles = append(titles, tile.Title+"|"+tile.Detail)
+	}
+	want := []string{"Movies|1 movie", "The Doc|", "Clips|2 episodes"}
+	if strings.Join(titles, ",") != strings.Join(want, ",") {
+		t.Errorf("tiles %v, want %v", titles, want)
+	}
+
+	press(s, "3")
+	page = s.menuPage()
+	if page.Title != "CLIPS" || !page.Back || len(page.Tiles) != 2 || page.Tiles[0].Title != "Clip B" {
+		t.Errorf("inside Clips: %+v", page)
+	}
+	press(s, "0")
+	if s.cinema == nil || s.cinema.inside != nil {
+		t.Fatal("0 inside a folder should go back up, not leave")
+	}
+
+	press(s, "1")
+	page = s.menuPage()
+	if page.Title != "MOVIE NIGHT" || page.Wide || len(page.Tiles) != 1 || page.Tiles[0].Title != "Up (2009)" {
+		t.Errorf("inside Movies: %+v", page)
+	}
+	press(s, "00")
+	if s.cinema != nil {
+		t.Error("0 at the top should leave On Demand")
+	}
+}
+
+func TestPlayingAnEpisode(t *testing.T) {
+	s, p, clock, root := shelfStation(t)
+	press(s, "0"+testPIN+"3"+"2")
+	loads := p.MovieLoads()
+	if len(loads) != 1 {
+		t.Fatalf("loads %v", loads)
+	}
+	want := movieLoad{Path: "/lib/a.mp4", Opts: player.MovieOptions{Audio: 1}}
+	if loads[0] != want {
+		t.Errorf("loaded %+v, want %+v", loads[0], want)
+	}
+
+	tracks := len(p.Tracks())
+	press(s, "82")
+	if len(p.Tracks()) != tracks {
+		t.Error("an episode has no tracks to change")
+	}
+
+	// Stopped four minutes into a ten minute clip, it offers to resume.
+	p.setPosition("/lib/a.mp4", 4*time.Minute)
+	press(s, "0")
+	positions, err := movie.ReadPositions(filepath.Join(root, "movie-positions.json"))
+	if err != nil || positions["clips/a"] != 4*time.Minute {
+		t.Fatalf("positions %v %v", positions, err)
+	}
+	if page := s.menuPage(); page.Title != "CLIPS" {
+		t.Errorf("stopping should go back to the folder, on %q", page.Title)
+	}
+	press(s, "2")
+	if s.cinema.screen != screenResume {
+		t.Fatalf("screen %v, want the resume question", s.cinema.screen)
+	}
+	press(s, "1")
+	if got := p.MovieLoads(); got[len(got)-1].Offset != 4*time.Minute {
+		t.Errorf("resumed at %v", got[len(got)-1].Offset)
+	}
+
+	s.handle(player.Event{Kind: player.EndFile, Reason: player.ReasonEOF, Path: "/lib/a.mp4"})
+	clock.Advance(theEndShown)
+	s.movieTimeout()
+	if s.cinema.screen != screenMenu || s.menuPage().Title != "CLIPS" {
+		t.Errorf("after The End: screen %v on %q, want the folder", s.cinema.screen, s.menuPage().Title)
+	}
+}
+
+func TestEmptyShelfIsTheMovieMenu(t *testing.T) {
+	s, _, _, root := movieStation(t, keyChannels(), upMovie())
+	// Everything on the shelf has left the library.
+	putOnShelf(t, root, shelf.Entry{Item: &shelf.Item{Channel: "clips", ID: "gone"}})
+	press(s, "0"+testPIN)
+	if page := s.menuPage(); page.Title != "MOVIE NIGHT" || page.Wide || len(page.Tiles) != 1 {
+		t.Errorf("page %+v, want the movies alone", page)
+	}
+}
+
+func TestBuildMenuWithoutMovies(t *testing.T) {
+	top := buildMenu(nil, "/movies", []shelf.Shown{{Video: &shelf.Video{
+		Item: shelf.Item{Channel: "clips", ID: "a"}, Title: "Clip A",
+		Video: schedule.Item{ID: "a", Path: "/lib/a.mp4", Duration: time.Minute},
+	}}})
+	if top.title != "ON DEMAND" || len(top.tiles) != 1 || top.tiles[0].play.key != "clips/a" {
+		t.Errorf("top %+v", top)
 	}
 }
