@@ -57,3 +57,8 @@ docs/plans/          design docs and plan.md
 - `make pi-ingest PI_HOST=channel3.local ARGS="--channel bluey"` runs an ingest on the Pi as the service user. Ingest cannot run while `serve` holds the pid guard, so it stops the service, ingests and starts it again, and the TV is dark for the duration. Ingesting on the Mac and rsyncing the library is the no-downtime route.
 - **Never deploy while ingest runs or while the kids are watching.** A deploy restarts the service and kills anything in flight.
 - Every flag Phase 4 discovers (mpv output, audio device, `--cec`, `--input-device`) lives in `/etc/default/channel3` as `CHANNEL3_FLAGS`, never in the unit. `deploy/README.md` has the full procedure.
+
+## Ship
+
+- **Non-prod:** there is no staging box. Pushing `main` to GitHub deploys nothing (no CI), so commit and push freely; the Mac against `~/srv/channel3` is the test bench.
+- **Prod:** the Pi in the living room, by `make deploy PI_HOST=channel3.local`. Always ask first, and never while ingest runs or the kids are watching.
