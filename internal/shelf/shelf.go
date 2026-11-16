@@ -176,6 +176,10 @@ func newFolderID() (string, error) {
 // Path is where the shelf lives under root.
 func Path(root string) string { return filepath.Join(root, "shelf.json") }
 
+// GrownupPath is where the grown-up shelf lives under root: a second shelf,
+// opened with its own code, in the same format.
+func GrownupPath(root string) string { return filepath.Join(root, "shelf-grownup.json") }
+
 // Store reads and writes the shelf file. It is safe to use from several
 // goroutines: the API's handlers and the television's menu both read it.
 type Store struct {
@@ -184,7 +188,10 @@ type Store struct {
 }
 
 // NewStore is the shelf under root.
-func NewStore(root string) *Store { return &Store{path: Path(root)} }
+func NewStore(root string) *Store { return NewStoreAt(Path(root)) }
+
+// NewStoreAt is the shelf file at path.
+func NewStoreAt(path string) *Store { return &Store{path: path} }
 
 // Read is the shelf as saved. A shelf never saved is empty at revision 0.
 func (s *Store) Read() (Shelf, error) {

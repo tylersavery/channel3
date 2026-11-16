@@ -8,19 +8,19 @@ import (
 	"github.com/tylersavery/channel3/internal/shelf"
 )
 
-// shelfCovers makes the first cover for every shelf item that has none: a
-// frame a quarter of the way into its video. It works one frame at a time at
+// shelfCovers makes the first cover for every shelf item that has none, on
+// every shelf: a frame a quarter of the way into its video. It works one frame at a time at
 // the lowest priority, whenever the shelf is saved and once the station is up.
 type shelfCovers struct {
-	store    *shelf.Store
+	stores   []*shelf.Store
 	covers   shelf.Covers
 	channels func() []schedule.Channel
 	kick     chan struct{}
 	log      *slog.Logger
 }
 
-func newShelfCovers(store *shelf.Store, covers shelf.Covers, channels func() []schedule.Channel, log *slog.Logger) *shelfCovers {
-	return &shelfCovers{store: store, covers: covers, channels: channels, kick: make(chan struct{}, 1), log: log}
+func newShelfCovers(stores []*shelf.Store, covers shelf.Covers, channels func() []schedule.Channel, log *slog.Logger) *shelfCovers {
+	return &shelfCovers{stores: stores, covers: covers, channels: channels, kick: make(chan struct{}, 1), log: log}
 }
 
 // Kick asks for a pass. A pass already asked for covers this one too.
@@ -45,20 +45,22 @@ func (w *shelfCovers) Run(ctx context.Context) {
 
 // fill makes every missing cover it can.
 func (w *shelfCovers) fill(ctx context.Context) {
-	current, err := w.store.Read()
-	if err != nil {
-		w.log.Error("could not read the shelf to make covers", "error", err)
-		return
-	}
-	lib := shelf.NewLibrary(w.channels())
 	var items []shelf.Item
-	for _, e := range current.Entries {
-		if e.Item != nil {
-			items = append(items, *e.Item)
-		} else {
-			items = append(items, e.Folder.Items...)
+	for _, store := range w.stores {
+		current, err := store.Read()
+		if err != nil {
+			w.log.Error("could not read a shelf to make covers", "error", err)
+			continue
+		}
+		for _, e := range current.Entries {
+			if e.Item != nil {
+				items = append(items, *e.Item)
+			} else {
+				items = append(items, e.Folder.Items...)
+			}
 		}
 	}
+	lib := shelf.NewLibrary(w.channels())
 	for _, it := range items {
 		if ctx.Err() != nil {
 			return

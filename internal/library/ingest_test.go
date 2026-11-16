@@ -877,6 +877,26 @@ func TestIngestRefusesWhileServeIsBroadcasting(t *testing.T) {
 	}
 }
 
+// TestIngestAlongsideBroadcastDownloads is serve's own grown-up download,
+// which is the one run allowed beside the broadcast.
+func TestIngestAlongsideBroadcastDownloads(t *testing.T) {
+	captureLogs(t)
+	f := newIngestFixture(t)
+	const source = "https://www.youtube.com/watch?v=zulu001"
+	f.runner.entries[source] = []Entry{{ID: "zulu001", URL: source, Title: "Steam Engines"}}
+	if err := os.WriteFile(PIDFile(f.root), []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
+		t.Fatalf("write pid file: %v", err)
+	}
+
+	report, err := f.run(trainsChannel(source), func(o *IngestOptions) { o.AlongsideBroadcast = true })
+	if err != nil {
+		t.Fatalf("Ingest refused to run alongside the broadcast: %v", err)
+	}
+	if report != (Report{OK: 1}) {
+		t.Errorf("report = %+v, want the video downloaded", report)
+	}
+}
+
 // TestIngestIgnoresAStalePIDFile covers the pid file serve left behind when it
 // was killed rather than stopped. The process it names has gone, so ingest runs.
 func TestIngestIgnoresAStalePIDFile(t *testing.T) {

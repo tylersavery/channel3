@@ -60,6 +60,14 @@ type Deps struct {
 	Shelf      ShelfStore
 	Covers     *shelf.Covers
 	ShelfSaved func()
+	// GrownupShelf is the second shelf, opened on channel 0 with GrownupPIN
+	// and chosen here with ?shelf=grownup. Nil leaves it off. Its saves and
+	// cover changes carry GrownupPIN rather than UploadPIN.
+	GrownupShelf ShelfStore
+	GrownupPIN   string
+	// Grownup downloads pasted links onto the grown-up shelf. It needs
+	// GrownupShelf as well.
+	Grownup Grownup
 }
 
 // server holds the dependencies with their defaults applied.
@@ -99,6 +107,8 @@ func New(deps Deps) http.Handler {
 	mux.Handle("/api/shelf", http.HandlerFunc(s.handleShelf))
 	mux.Handle("/api/shelf/cover", http.HandlerFunc(s.handleCover))
 	mux.Handle("/api/shelf/cover/frame", http.HandlerFunc(s.handleCoverFrame))
+	mux.Handle("/api/grownup/downloads", http.HandlerFunc(s.handleGrownupDownloads))
+	mux.Handle("/api/grownup/videos", http.HandlerFunc(s.handleGrownupVideo))
 	mux.Handle("/api/", readOnly(http.HandlerFunc(handleUnknownAPI)))
 	mux.Handle("/", readOnly(s.ui()))
 	return mux

@@ -82,6 +82,9 @@ type YTDLP struct {
 	ExpandTimeout time.Duration
 	// DownloadTimeout bounds one download. Zero means defaultDownloadTimeout.
 	DownloadTimeout time.Duration
+	// Nice runs yt-dlp, and the ffmpeg it starts, at the lowest priority, for
+	// downloading beside playback.
+	Nice bool
 }
 
 // Expand lists the videos a source URL stands for, without downloading anything.
@@ -194,7 +197,11 @@ func (y YTDLP) run(timeout time.Duration, args []string) ([]byte, error) {
 
 	var stdout bytes.Buffer
 	stderr := &boundedBuffer{limit: maxCapturedStderr}
-	cmd := exec.CommandContext(ctx, bin, args...)
+	name := bin
+	if y.Nice {
+		name, args = "nice", append([]string{"-n", "19", bin}, args...)
+	}
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = stderr
 	// yt-dlp starts ffmpeg to merge a download. Without this the deadline kills

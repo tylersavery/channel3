@@ -68,6 +68,10 @@ type movieShelf struct {
 	pin       string
 	episodes  *shelf.Store
 	covers    shelf.Covers
+	// grownupPIN is a second code, the same length as pin, that opens the
+	// grown-up shelf instead. Empty, with grownup nil, leaves it off.
+	grownupPIN string
+	grownup    *shelf.Store
 }
 
 func newMovieShelf(root, pin string) *movieShelf {
@@ -223,6 +227,9 @@ type cinema struct {
 	// lastPos is where the movie was at the last look, which is where it
 	// picks up if mpv restarts underneath it.
 	lastPos time.Duration
+	// grownup says the grown-up code opened Movie Mode, so the menu is the
+	// grown-up shelf.
+	grownup bool
 }
 
 // watchingMovies says Movie Mode has taken the screen from the broadcast. On
@@ -294,13 +301,19 @@ func (s *station) pinKey(k input.Key) {
 		s.drawMovies()
 		return
 	}
-	if subtle.ConstantTimeCompare([]byte(c.typed), []byte(s.shelf.pin)) != 1 {
+	// Both codes are always compared, so how long the check takes says
+	// nothing about which one was nearly typed.
+	lane := subtle.ConstantTimeCompare([]byte(c.typed), []byte(s.shelf.pin)) == 1
+	grownup := s.shelf.grownup != nil &&
+		subtle.ConstantTimeCompare([]byte(c.typed), []byte(s.shelf.grownupPIN)) == 1
+	if !lane && !grownup {
 		s.log.Warn("movie mode: wrong code")
 		s.closeMovies("wrong code")
 		s.showText("WRONG CODE", 2*time.Second, volumeScale)
 		return
 	}
-	s.log.Info("movie mode: code accepted")
+	c.grownup = grownup
+	s.log.Info("movie mode: code accepted", "grown-up", grownup)
 	s.enterMenu()
 }
 
@@ -315,20 +328,33 @@ func (c *cinema) level() *level {
 // enterMenu takes the screen from the broadcast and shows the menu.
 func (s *station) enterMenu() {
 	c := s.cinema
-	movies, skipped, err := movie.Shelf(s.shelf.dir)
-	if err != nil {
-		s.log.Error("could not read the movies", "dir", s.shelf.dir, "error", err)
-	}
-	for _, e := range skipped {
-		s.log.Warn("leaving a movie off the menu", "error", e)
+	// The grown-up menu is its own shelf and nothing else: the movies are
+	// Lane's.
+	var movies []movie.Movie
+	store := s.shelf.grownup
+	if !c.grownup {
+		store = s.shelf.episodes
+		var skipped []error
+		var err error
+		movies, skipped, err = movie.Shelf(s.shelf.dir)
+		if err != nil {
+			s.log.Error("could not read the movies", "dir", s.shelf.dir, "error", err)
+		}
+		for _, e := range skipped {
+			s.log.Warn("leaving a movie off the menu", "error", e)
+		}
 	}
 	var shown []shelf.Shown
-	if picked, err := s.shelf.episodes.Read(); err != nil {
-		s.log.Error("could not read the shelf; showing the movies alone", "error", err)
+	if picked, err := store.Read(); err != nil {
+		s.log.Error("could not read the shelf; showing the movies alone", "grown-up", c.grownup, "error", err)
 	} else {
 		shown = shelf.Playable(picked, shelf.NewLibrary(s.PlayableChannels()))
 	}
 	c.top = buildMenu(movies, s.shelf.dir, shown)
+	if c.grownup {
+		// An empty grown-up shelf is an empty On Demand, not Movie Night.
+		c.top.title, c.top.wide = "ON DEMAND", true
+	}
 	c.inside, c.page, c.topPage = nil, 0, 0
 	c.pictures = make(map[string]image.Image)
 

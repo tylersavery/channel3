@@ -20,6 +20,9 @@ import (
 // Saving the shelf and changing a cover carry the upload PIN and exist only
 // when the box has one, like /api/upload. None of them changes what plays:
 // they change what the On Demand menu offers on channel 0, and nothing else.
+//
+// Every one of them takes ?shelf=grownup to act on the grown-up shelf instead,
+// whose changes carry the grown-up code.
 
 // ShelfStore is the shelf file. cmd/channel3 satisfies it with shelf.Store.
 type ShelfStore interface {
@@ -97,9 +100,13 @@ type shelfResponse struct {
 // whether each is on the shelf.
 func (s *server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 	var current shelf.Shelf
-	if s.deps.Shelf != nil {
+	if s.deps.Shelf != nil || r.URL.Query().Has("shelf") {
+		sh, ok := s.pickShelf(w, r)
+		if !ok {
+			return
+		}
 		var err error
-		if current, err = s.deps.Shelf.Read(); err != nil {
+		if current, err = sh.store.Read(); err != nil {
 			slog.Error("could not read the shelf", "error", err)
 			writeError(w, http.StatusInternalServerError, "could not read the shelf")
 			return
@@ -125,21 +132,21 @@ func (s *server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 
 // handleShelf reads the shelf, or saves it with the PIN.
 func (s *server) handleShelf(w http.ResponseWriter, r *http.Request) {
-	if s.deps.Shelf == nil {
-		writeError(w, http.StatusNotFound, "there is no shelf on this box")
+	sh, ok := s.pickShelf(w, r)
+	if !ok {
 		return
 	}
 	switch r.Method {
 	case http.MethodGet, http.MethodHead:
-		current, err := s.deps.Shelf.Read()
+		current, err := sh.store.Read()
 		if err != nil {
 			slog.Error("could not read the shelf", "error", err)
 			writeError(w, http.StatusInternalServerError, "could not read the shelf")
 			return
 		}
-		writeJSON(w, http.StatusOK, s.shelfJSON(current))
+		writeJSON(w, http.StatusOK, s.shelfJSON(current, sh.pin != ""))
 	case http.MethodPut:
-		if !s.shelfWriter(w, r) {
+		if !s.shelfWriter(w, r, sh) {
 			return
 		}
 		var next shelf.Shelf
@@ -148,7 +155,7 @@ func (s *server) handleShelf(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "the body is not a shelf: "+err.Error())
 			return
 		}
-		saved, err := s.deps.Shelf.Write(next)
+		saved, err := sh.store.Write(next)
 		if errors.Is(err, shelf.ErrStale) {
 			writeError(w, http.StatusConflict, err.Error())
 			return
@@ -157,11 +164,11 @@ func (s *server) handleShelf(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		slog.Info("shelf saved", "from", r.RemoteAddr, "revision", saved.Revision, "entries", len(saved.Entries))
+		slog.Info("shelf saved", "shelf", sh.name, "from", r.RemoteAddr, "revision", saved.Revision, "entries", len(saved.Entries))
 		if s.deps.ShelfSaved != nil {
 			s.deps.ShelfSaved()
 		}
-		writeJSON(w, http.StatusOK, s.shelfJSON(saved))
+		writeJSON(w, http.StatusOK, s.shelfJSON(saved, true))
 	default:
 		w.Header().Set("Allow", "GET, HEAD, PUT")
 		writeError(w, http.StatusMethodNotAllowed, "read the shelf with GET, save it with PUT")
@@ -203,7 +210,8 @@ func (s *server) handleCover(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "max-age=86400")
 		http.ServeContent(w, r, "", info.ModTime(), f)
 	case http.MethodPut:
-		if !s.shelfWriter(w, r) || !s.onShelf(w, key) {
+		sh, ok := s.pickShelf(w, r)
+		if !ok || !s.shelfWriter(w, r, sh) || !s.onShelf(w, sh, key) {
 			return
 		}
 		err := s.deps.Covers.FromPicture(key, http.MaxBytesReader(w, r.Body, maxCoverBody))
@@ -250,7 +258,8 @@ func (s *server) handleCoverFrame(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "at must be a number of seconds into the video")
 		return
 	}
-	if !s.shelfWriter(w, r) || !s.onShelf(w, key) {
+	sh, ok := s.pickShelf(w, r)
+	if !ok || !s.shelfWriter(w, r, sh) || !s.onShelf(w, sh, key) {
 		return
 	}
 	video, ok := shelf.NewLibrary(s.deps.Channels())[ref]
@@ -270,15 +279,44 @@ func (s *server) handleCoverFrame(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"cover": s.coverURL(key)})
 }
 
-// shelfWriter checks a request that changes the shelf carries the PIN, and
-// answers it when not.
-func (s *server) shelfWriter(w http.ResponseWriter, r *http.Request) bool {
-	if s.deps.UploadPIN == "" {
+// chosenShelf is one of the box's shelves and the code that changes it.
+type chosenShelf struct {
+	name  string
+	store ShelfStore
+	pin   string
+}
+
+// pickShelf is the shelf a request names with ?shelf=, Lane's when it names
+// none, and answers the request when there is no such shelf.
+func (s *server) pickShelf(w http.ResponseWriter, r *http.Request) (chosenShelf, bool) {
+	switch name := r.URL.Query().Get("shelf"); name {
+	case "":
+		if s.deps.Shelf == nil {
+			writeError(w, http.StatusNotFound, "there is no shelf on this box")
+			return chosenShelf{}, false
+		}
+		return chosenShelf{name: "on demand", store: s.deps.Shelf, pin: s.deps.UploadPIN}, true
+	case "grownup":
+		if s.deps.GrownupShelf == nil {
+			writeError(w, http.StatusNotFound, "there is no grown-up shelf on this box")
+			return chosenShelf{}, false
+		}
+		return chosenShelf{name: "grown-up", store: s.deps.GrownupShelf, pin: s.deps.GrownupPIN}, true
+	default:
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("shelf %q is not one of this box's; leave it out, or use grownup", name))
+		return chosenShelf{}, false
+	}
+}
+
+// shelfWriter checks a request that changes a shelf carries that shelf's
+// code, and answers it when not.
+func (s *server) shelfWriter(w http.ResponseWriter, r *http.Request, sh chosenShelf) bool {
+	if sh.pin == "" {
 		writeError(w, http.StatusNotFound, "editing the shelf is off on this box")
 		return false
 	}
 	pin := r.Header.Get("X-Upload-PIN")
-	if subtle.ConstantTimeCompare([]byte(pin), []byte(s.deps.UploadPIN)) != 1 {
+	if subtle.ConstantTimeCompare([]byte(pin), []byte(sh.pin)) != 1 {
 		slog.Warn("shelf change refused: wrong PIN", "from", r.RemoteAddr, "path", r.URL.Path)
 		writeError(w, http.StatusForbidden, "wrong PIN")
 		return false
@@ -288,8 +326,8 @@ func (s *server) shelfWriter(w http.ResponseWriter, r *http.Request) bool {
 
 // onShelf checks a cover key belongs to something on the shelf, so covers
 // cannot be made for anything else, and answers the request when not.
-func (s *server) onShelf(w http.ResponseWriter, key string) bool {
-	current, err := s.deps.Shelf.Read()
+func (s *server) onShelf(w http.ResponseWriter, sh chosenShelf, key string) bool {
+	current, err := sh.store.Read()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not read the shelf")
 		return false
@@ -308,7 +346,7 @@ func (s *server) onShelf(w http.ResponseWriter, key string) bool {
 }
 
 // shelfJSON is the shelf as GET /api/shelf reports it.
-func (s *server) shelfJSON(sh shelf.Shelf) shelfResponse {
+func (s *server) shelfJSON(sh shelf.Shelf, editable bool) shelfResponse {
 	lib := shelf.NewLibrary(s.deps.Channels())
 	item := func(it shelf.Item) shelfItemJSON {
 		key := shelf.ItemKey(it.Ref())
@@ -321,7 +359,7 @@ func (s *server) shelfJSON(sh shelf.Shelf) shelfResponse {
 		return out
 	}
 	out := shelfResponse{Revision: sh.Revision, Entries: make([]shelfEntryJSON, 0, len(sh.Entries)),
-		Editable: s.deps.UploadPIN != ""}
+		Editable: editable}
 	for _, e := range sh.Entries {
 		if e.Item != nil {
 			it := item(*e.Item)

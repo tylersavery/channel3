@@ -46,6 +46,12 @@ type IngestOptions struct {
 	// broadcasting: probing a file or two does not compete with playback the
 	// way a download does.
 	LocalOnly bool
+	// AlongsideBroadcast lets a run download while serve is broadcasting. It
+	// is what serve itself runs for the grown-up shelf: one pasted video at a
+	// time into one hidden channel, with a Runner and Measurer at the lowest
+	// priority. Nothing else sets it; an ingest from the command line still
+	// refuses to run beside a broadcast.
+	AlongsideBroadcast bool
 }
 
 // Report counts what one run did. An item is in exactly one of these.
@@ -129,7 +135,7 @@ func newIngestRun(opts IngestOptions) (*ingestRun, error) {
 	if err := checkLocalSlugs(root, channels); err != nil {
 		return nil, err
 	}
-	if !opts.LocalOnly {
+	if !opts.LocalOnly && !opts.AlongsideBroadcast {
 		if err := checkNotBroadcasting(root); err != nil {
 			return nil, err
 		}

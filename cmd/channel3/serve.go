@@ -76,6 +76,8 @@ func runServe(g *globals, args []string) error {
 	cecDevice := fs.String("cec-device", "/dev/cec0", "CEC device cec-ctl talks to")
 	uploadPIN := fs.String("upload-pin", os.Getenv("CHANNEL3_UPLOAD_PIN"),
 		"PIN a phone must send to upload a home video (default $CHANNEL3_UPLOAD_PIN; empty turns uploads off)")
+	grownupPIN := fs.String("grownup-pin", os.Getenv("CHANNEL3_GROWNUP_PIN"),
+		"second channel 0 code, the same length as the upload PIN, that opens the grown-up shelf (default $CHANNEL3_GROWNUP_PIN; empty turns it off)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -100,6 +102,7 @@ func runServe(g *globals, args []string) error {
 		CEC:          *useCEC,
 		CECDevice:    *cecDevice,
 		UploadPIN:    *uploadPIN,
+		GrownupPIN:   *grownupPIN,
 	}); err != nil {
 		return &exitError{code: 1, err: err}
 	}
@@ -127,6 +130,28 @@ type serveOptions struct {
 	CECDevice string
 	// UploadPIN turns on home video uploads. Empty leaves them off.
 	UploadPIN string
+	// GrownupPIN is the second channel 0 code, which opens the grown-up
+	// shelf. Empty leaves it off.
+	GrownupPIN string
+}
+
+// grownupCode is the grown-up shelf's code, or "" with the reason it cannot
+// be used. The code screen checks what was typed once it is as long as the
+// upload PIN, so the two must be the same length, and they must differ.
+func grownupCode(upload, grownup string) (string, error) {
+	switch {
+	case grownup == "":
+		return "", nil
+	case upload == "":
+		return "", errors.New("there is no upload PIN, so there is no channel 0 to open it from")
+	case len(grownup) != len(upload):
+		return "", fmt.Errorf("it is %d digits and the upload PIN is %d; they must be the same length", len(grownup), len(upload))
+	case grownup == upload:
+		return "", errors.New("it is the same as the upload PIN")
+	case strings.Trim(grownup, "0123456789") != "":
+		return "", errors.New("it must be digits only, to be typed on the remote")
+	}
+	return grownup, nil
 }
 
 // serve broadcasts until the context is cancelled.
@@ -208,7 +233,37 @@ func serve(ctx context.Context, root string, opts serveOptions) error {
 	// made in the background.
 	shelfStore := shelf.NewStore(root)
 	covers := shelf.Covers{Dir: shelf.CoversDir(root)}
-	coverMaker := newShelfCovers(shelfStore, covers, guideChannels, slog.Default())
+	stores := []*shelf.Store{shelfStore}
+
+	// The grown-up shelf is a second shelf behind its own code. A code that
+	// cannot work is logged and left off rather than stopping the broadcast.
+	grownupPIN, err := grownupCode(opts.UploadPIN, opts.GrownupPIN)
+	if err != nil {
+		slog.Error("the grown-up shelf is off: its code cannot be used", "error", err)
+	}
+	var grownupStore *shelf.Store
+	var grownupShelf api.ShelfStore
+	if grownupPIN != "" {
+		grownupStore = shelf.NewStoreAt(shelf.GrownupPath(root))
+		grownupShelf = grownupStore
+		stores = append(stores, grownupStore)
+	}
+	coverMaker := newShelfCovers(stores, covers, guideChannels, slog.Default())
+
+	// Links pasted on the guide's Grown-ups tab download beside the broadcast,
+	// one at a time at the lowest priority, onto the grown-up shelf.
+	var grownup api.Grownup
+	if grownupStore != nil {
+		worker := newGrownupWorker(root, grownupStore, covers, slog.Default())
+		worker.rescan = func() {
+			if s := current.Load(); s != nil {
+				s.RequestRescan()
+			}
+		}
+		worker.saved = coverMaker.Kick
+		go worker.Run(ctx)
+		grownup = worker
+	}
 	go coverMaker.Run(ctx)
 
 	stopHTTP, err := startHTTP(opts.Listen, api.Deps{
@@ -227,6 +282,10 @@ func serve(ctx context.Context, root string, opts serveOptions) error {
 		Shelf:      shelfStore,
 		Covers:     &covers,
 		ShelfSaved: coverMaker.Kick,
+
+		GrownupShelf: grownupShelf,
+		GrownupPIN:   grownupPIN,
+		Grownup:      grownup,
 	})
 	if err != nil {
 		return err
@@ -284,6 +343,9 @@ func serve(ctx context.Context, root string, opts serveOptions) error {
 	var shelf *movieShelf
 	if opts.UploadPIN != "" {
 		shelf = newMovieShelf(root, opts.UploadPIN)
+		if grownupStore != nil {
+			shelf.grownupPIN, shelf.grownup = grownupPIN, grownupStore
+		}
 	}
 	station, err := newStation(stationOptions{
 		Player:       mpv,
