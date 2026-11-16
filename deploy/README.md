@@ -160,6 +160,18 @@ The shelf is managed from the guide page's On Demand tab (`http://channel3.local
 
 The shelf is `/srv/channel3/shelf.json` and the covers are in `/srv/channel3/shelf-covers/`. It only points at the library, so a video must be on a channel first; one that leaves the library drops off the menu and comes back if it returns.
 
+## 7f. Hidden channels
+
+A channel whose YAML has `hidden: true` is off the dial: channel up and down skip it, its number does nothing, and neither the on-screen guide nor the guide page lists it. Its videos stay in the library, so the On Demand shelf can still offer them, and home video uploads and the radio stations work as before behind it. Set it back to `false`, or delete the line, to put the channel back on its number. The channel files are mirrored from the Mac by `make pi-ingest`; to change one without the TV going dark, copy that file over and restart the service when nobody is watching.
+
+## 7g. The grown-up shelf
+
+A second shelf on channel 0 for videos the kids aren't into yet. Press 0, then the grown-up code (`CHANNEL3_GROWNUP_PIN`, the same length as the upload PIN) instead of the usual one, and the menu is the grown-up shelf alone, with no Movies folder. It plays and resumes like the rest of On Demand.
+
+To fill it, open `http://channel3.local/#grown-ups` on a phone or a computer, paste a YouTube link and press Add; the first change asks for the grown-up code. The service downloads it in the background, one at a time at the lowest priority, into the hidden `grownup` channel, and it appears at the top of the shelf with a cover when it is done. A link copied from a playlist downloads just that video. Delete on a downloaded video removes it from the shelf and from the drive. The tab can also put any library video on the grown-up shelf, and folders work as on Lane's.
+
+Setup, once: add `channels/grownup.yaml` (id `grownup`, `hidden: true`, no sources) on the Mac and copy it to `/srv/channel3/channels/`, add `CHANNEL3_GROWNUP_PIN=` to `/etc/default/channel3`, and restart. The shelf is `/srv/channel3/shelf-grownup.json`; covers and resume positions are shared with Lane's.
+
 ## 8. Logs
 
 ```
