@@ -45,6 +45,10 @@ type Channel struct {
 	// Guide makes the channel the on-screen guide rather than a channel of
 	// its own videos. Nil for every other channel.
 	Guide *Guide
+	// Hidden takes the channel off the dial: the remote, the guides and the
+	// startup channel all pass it by. Its videos stay in the library, so the
+	// On Demand shelf can still offer them.
+	Hidden bool
 }
 
 // Guide is a guide channel's settings.
@@ -157,10 +161,11 @@ type channelFile struct {
 	Sources []Source  `yaml:"sources"`
 	Bumper  yaml.Node `yaml:"bumper"`
 	Guide   yaml.Node `yaml:"guide"`
+	Hidden  bool      `yaml:"hidden"`
 }
 
 // configFields are the only keys a channel config file may contain.
-var configFields = []string{"id", "number", "name", "sources", "bumper", "guide"}
+var configFields = []string{"id", "number", "name", "sources", "bumper", "guide", "hidden"}
 
 // idPattern is the accepted channel id. It doubles as a directory name under
 // <root>/library, which is why it stays this narrow.
@@ -344,7 +349,7 @@ func readChannelFile(path, name string) (Channel, uniqueness, []error) {
 		errs = append(errs, &ConfigError{File: name, Field: "sources", Msg: "a guide channel shows the guide, so it has no sources of its own"})
 	}
 
-	ch := Channel{ID: raw.ID, Number: raw.Number, Name: raw.Name, Sources: raw.Sources, Bumper: bumper, Guide: guide}
+	ch := Channel{ID: raw.ID, Number: raw.Number, Name: raw.Name, Sources: raw.Sources, Bumper: bumper, Guide: guide, Hidden: raw.Hidden}
 	return ch, uniqueness{id: idValid, number: numberValid}, errs
 }
 

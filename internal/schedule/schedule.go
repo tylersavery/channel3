@@ -43,6 +43,10 @@ type Channel struct {
 	// from, which the guide lists as one of its own rows.
 	Guide      bool
 	GuideMusic string
+	// Hidden is a channel off the dial. It is scheduled like any other, but
+	// the remote, the guides and the startup channel pass it by; the On
+	// Demand shelf can still offer its items.
+	Hidden bool
 }
 
 // Slot is one airing of one item.

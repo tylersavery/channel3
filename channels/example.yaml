@@ -10,6 +10,7 @@
 # name: what the guide shows.
 # sources: one entry per video, playlist or file. An entry takes any of the three forms below.
 # bumper: optional. The card shown for a moment after tuning here: a background colour written as #RRGGBB, and optionally the name of an SVG icon in <root>/icons. Leave it out for no card.
+# hidden: optional, false by default. true takes the channel off the dial: channel up and down skip it, its number does nothing, and neither guide lists it. Its videos stay in the library, so the On Demand shelf can still offer them, and setting it back to false puts the channel back on its number.
 # A channel with no sources is allowed. It shows the Please Stand By card until you give it something to play.
 
 id: trains

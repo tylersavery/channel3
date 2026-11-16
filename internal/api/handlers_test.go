@@ -657,3 +657,49 @@ func TestSongsCarryTheirArtist(t *testing.T) {
 		t.Errorf("video items carry an artist key: %s", body)
 	}
 }
+
+// TestHiddenChannelsAreOnlyInTheLibrary is a hidden channel left out of the
+// guide's answers but kept, and marked, in the library the shelf picks from.
+func TestHiddenChannelsAreOnlyInTheLibrary(t *testing.T) {
+	deps := testDeps()
+	deps.Channels = func() []schedule.Channel {
+		channels := fixtureChannels()
+		channels[0].Hidden = true // docs, 7
+		return channels
+	}
+	for _, target := range []string{"/api/channels", "/api/now", "/api/guide"} {
+		var body struct {
+			Channels []struct {
+				ID string `json:"id"`
+			} `json:"channels"`
+		}
+		decode(t, get(t, deps, target), &body)
+		for _, ch := range body.Channels {
+			if ch.ID == "docs" {
+				t.Errorf("%s lists the hidden channel", target)
+			}
+		}
+	}
+
+	var lib struct {
+		Channels []struct {
+			ID     string `json:"id"`
+			Hidden bool   `json:"hidden"`
+		} `json:"channels"`
+	}
+	decode(t, get(t, deps, "/api/library"), &lib)
+	found := false
+	for _, ch := range lib.Channels {
+		if ch.ID == "docs" {
+			found = true
+			if !ch.Hidden {
+				t.Error("the library does not mark the hidden channel")
+			}
+		} else if ch.Hidden {
+			t.Errorf("the library marks %s hidden", ch.ID)
+		}
+	}
+	if !found {
+		t.Error("the library left out the hidden channel")
+	}
+}

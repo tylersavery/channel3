@@ -490,3 +490,36 @@ func TestLoadChannelsGuide(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadChannelsHidden(t *testing.T) {
+	captureLogs(t)
+	cases := []struct {
+		name, body string
+		want       bool
+		wantErr    string
+	}{
+		{"on the dial by default", "id: farm\nnumber: 3\nname: FarmTV\nsources: []\n", false, ""},
+		{"hidden", "id: farm\nnumber: 3\nname: FarmTV\nhidden: true\nsources: []\n", true, ""},
+		{"hidden false", "id: farm\nnumber: 3\nname: FarmTV\nhidden: false\nsources: []\n", false, ""},
+		{"not a boolean", "id: farm\nnumber: 3\nname: FarmTV\nhidden: sometimes\nsources: []\n", false, "parse"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeConfig(t, dir, "c.yaml", tc.body)
+			channels, err := LoadChannels(dir)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("error = %v, want one mentioning %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LoadChannels: %v", err)
+			}
+			if channels[0].Hidden != tc.want {
+				t.Errorf("hidden = %v, want %v", channels[0].Hidden, tc.want)
+			}
+		})
+	}
+}

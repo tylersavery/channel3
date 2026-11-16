@@ -245,6 +245,12 @@ func newStation(opts stationOptions) (*station, error) {
 		log.Warn("no channels are configured, showing stand by")
 	}
 
+	if ch, ok := s.channel(opts.StartChannel); ok && ch.Hidden {
+		// A hidden start channel would leave the remote unable to come back
+		// to where the box started, so it is passed by like any hidden one.
+		log.Warn("the start channel is hidden, tuning the lowest on the dial", "channel", opts.StartChannel)
+		opts.StartChannel = ""
+	}
 	if err := s.tune(opts.StartChannel); err != nil {
 		if len(channels) > 0 {
 			return nil, err
@@ -260,23 +266,29 @@ func newStation(opts stationOptions) (*station, error) {
 	return s, nil
 }
 
-// tune selects the channel to play. An empty id takes the lowest number, which
-// is what a television does when it is switched on with no memory.
+// tune selects the channel to play. An empty id takes the lowest number on the
+// dial, which is what a television does when it is switched on with no memory.
+// A hidden channel is never tuned.
 func (s *station) tune(id string) error {
 	s.stalled = false
 	if id == "" {
-		if len(s.channels) == 0 {
-			// Nothing to tune. The station stays on the card and the tuner is
-			// still rebuilt, so a key press is a no-op rather than a panic.
-			s.setTuned("")
-			return nil
+		// loadStation sorts by number, so the first on the dial is the lowest.
+		for _, ch := range s.channels {
+			if !ch.Hidden {
+				s.setTuned(ch.ID)
+				return nil
+			}
 		}
-		// loadStation sorts by number, so the first is the lowest.
-		s.setTuned(s.channels[0].ID)
+		// Nothing to tune. The station stays on the card and the tuner is
+		// still rebuilt, so a key press is a no-op rather than a panic.
+		s.setTuned("")
 		return nil
 	}
 	for _, ch := range s.channels {
 		if ch.ID == id {
+			if ch.Hidden {
+				return fmt.Errorf("station: channel %q is hidden", id)
+			}
 			s.setTuned(id)
 			return nil
 		}
@@ -357,10 +369,13 @@ func (s *station) retune() {
 }
 
 // tunerChannels is the tuner's view of the station: numbers and ids, nothing
-// about what is in them.
+// about what is in them, and nothing of a hidden channel.
 func tunerChannels(channels []schedule.Channel) []input.Channel {
 	out := make([]input.Channel, 0, len(channels))
 	for _, ch := range channels {
+		if ch.Hidden {
+			continue
+		}
 		out = append(out, input.Channel{ID: ch.ID, Number: ch.Number})
 	}
 	return out
@@ -1219,9 +1234,11 @@ func (s *station) rollover(day time.Time) {
 	s.refreshCards()
 	s.day = day
 
-	if _, ok := s.channel(s.tuned); !ok {
+	if ch, ok := s.channel(s.tuned); !ok || ch.Hidden {
 		if s.tuned == "" {
 			s.log.Info("the rescan found channels, tuning the lowest", "channels", len(channels))
+		} else if ok {
+			s.log.Warn("the tuned channel is now hidden, tuning the lowest", "channel", s.tuned)
 		} else {
 			s.log.Warn("the tuned channel is no longer configured, tuning the lowest", "channel", s.tuned)
 		}
@@ -1383,14 +1400,14 @@ func (s *station) showGuidePage() {
 	}
 }
 
-// guideRows is every channel but the guide itself, in number order, with what
-// is on now and next.
+// guideRows is every channel on the dial but the guide itself, in number
+// order, with what is on now and next.
 func (s *station) guideRows() []bumper.GuideRow {
 	now := s.now()
 	loc := s.clockLocation()
 	var rows []bumper.GuideRow
 	for _, ch := range s.channels {
-		if ch.Guide {
+		if ch.Guide || ch.Hidden {
 			continue
 		}
 		row := bumper.GuideRow{Number: ch.Number, Name: ch.Name, Highlight: ch.ID == s.cameFrom}

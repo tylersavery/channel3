@@ -59,6 +59,7 @@ func loadStation(root string) ([]schedule.Channel, error) {
 			Number: ch.Number,
 			Name:   ch.Name,
 			Items:  scheduled,
+			Hidden: ch.Hidden,
 		}
 		if ch.Guide != nil {
 			sc.Guide, sc.GuideMusic = true, ch.Guide.Music

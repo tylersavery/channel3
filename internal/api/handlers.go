@@ -107,7 +107,7 @@ type errorResponse struct {
 
 // handleChannels lists the station.
 func (s *server) handleChannels(w http.ResponseWriter, r *http.Request) {
-	channels := s.sorted()
+	channels := s.onAir()
 	out := channelsResponse{Channels: make([]channelSummary, 0, len(channels))}
 	for _, ch := range channels {
 		out.Channels = append(out.Channels, channelSummary{
@@ -121,7 +121,7 @@ func (s *server) handleChannels(w http.ResponseWriter, r *http.Request) {
 // handleNow reports what every channel is airing and what follows it.
 func (s *server) handleNow(w http.ResponseWriter, r *http.Request) {
 	now := s.deps.Now()
-	channels := s.sorted()
+	channels := s.onAir()
 
 	out := nowResponse{
 		Time:     s.stamp(now),
@@ -151,7 +151,7 @@ func (s *server) handleGuide(w http.ResponseWriter, r *http.Request) {
 
 	from := s.deps.Now()
 	horizon := time.Duration(hours) * time.Hour
-	channels := s.sorted()
+	channels := s.onAir()
 
 	out := guideResponse{
 		From:     s.stamp(from),
@@ -230,6 +230,12 @@ func (s *server) sorted() []schedule.Channel {
 		return cmp.Compare(a.Number, b.Number)
 	})
 	return channels
+}
+
+// onAir is the sorted channel list without the hidden channels, which is what
+// the guide shows. The library keeps them, for the shelf.
+func (s *server) onAir() []schedule.Channel {
+	return slices.DeleteFunc(s.sorted(), func(ch schedule.Channel) bool { return ch.Hidden })
 }
 
 // stamp formats an instant as the API reports it: RFC 3339 in the broadcast

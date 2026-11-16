@@ -2385,3 +2385,50 @@ func TestGuideShowsNoSongTitles(t *testing.T) {
 		t.Errorf("guide music %q, want the song playing behind it", got)
 	}
 }
+
+// hiddenChannels is keyChannels with clips taken off the dial.
+func hiddenChannels() []schedule.Channel {
+	channels := keyChannels()
+	channels[1].Hidden = true
+	return channels
+}
+
+// TestHiddenChannelsAreOffTheDial is a hidden channel passed by everywhere a
+// viewer could reach it: channel up, its number, the startup default, and a
+// start channel that names it.
+func TestHiddenChannelsAreOffTheDial(t *testing.T) {
+	clock := &fakeClock{now: noon()}
+
+	s := newTestStation(t, newFakePlayer(), clock, "kids", hiddenChannels())
+	s.key(input.Key{Action: input.ChannelUp})
+	if s.Tuned() != "docs" {
+		t.Errorf("channel up from kids tuned %q, want docs past the hidden clips", s.Tuned())
+	}
+	s.key(input.Key{Action: input.Digit, Digit: 5})
+	if s.Tuned() == "clips" {
+		t.Error("keying a hidden channel's number tuned it")
+	}
+
+	channels := hiddenChannels()
+	channels[0].Hidden = true
+	s = newTestStation(t, newFakePlayer(), clock, "", channels)
+	if s.Tuned() != "docs" {
+		t.Errorf("a bare start tuned %q, want the lowest channel on the dial", s.Tuned())
+	}
+
+	s = newTestStation(t, newFakePlayer(), clock, "clips", hiddenChannels())
+	if s.Tuned() != "kids" {
+		t.Errorf("a hidden start channel tuned %q, want the lowest channel on the dial", s.Tuned())
+	}
+}
+
+func TestTheGuideLeavesOutHiddenChannels(t *testing.T) {
+	channels := guideChannels()
+	channels[len(channels)-1].Hidden = true
+	s := newTestStation(t, newFakePlayer(), &fakeClock{now: noon()}, "clips", channels)
+	for _, row := range s.guideRows() {
+		if row.Number == channels[len(channels)-1].Number {
+			t.Errorf("the guide lists hidden channel %d", row.Number)
+		}
+	}
+}

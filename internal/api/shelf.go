@@ -46,7 +46,10 @@ type libraryItem struct {
 // libraryChannel is one channel of GET /api/library.
 type libraryChannel struct {
 	channelJSON
-	Items []libraryItem `json:"items"`
+	// Hidden marks a channel off the dial, whose videos the shelf can still
+	// offer.
+	Hidden bool          `json:"hidden,omitempty"`
+	Items  []libraryItem `json:"items"`
 }
 
 // libraryResponse is GET /api/library.
@@ -105,7 +108,7 @@ func (s *server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 	channels := s.sorted()
 	out := libraryResponse{Channels: make([]libraryChannel, 0, len(channels))}
 	for _, ch := range channels {
-		entry := libraryChannel{channelJSON: identify(ch), Items: make([]libraryItem, 0, len(ch.Items))}
+		entry := libraryChannel{channelJSON: identify(ch), Hidden: ch.Hidden, Items: make([]libraryItem, 0, len(ch.Items))}
 		for _, it := range ch.Items {
 			entry.Items = append(entry.Items, libraryItem{
 				ID:       it.ID,
