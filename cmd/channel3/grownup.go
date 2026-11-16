@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/tylersavery/channel3/internal/api"
 	"github.com/tylersavery/channel3/internal/library"
@@ -137,7 +138,8 @@ func (w *grownupWorker) trim() {
 func (w *grownupWorker) Downloads() []api.Download {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return slices.Clone(w.recent)
+	// Never nil, so the page is sent an empty list rather than null.
+	return append([]api.Download{}, w.recent...)
 }
 
 // update changes one download in place.
@@ -234,6 +236,10 @@ func (w *grownupWorker) download(link string, found func(title, id string)) (str
 	}); err != nil {
 		return title, entry.ID, fmt.Errorf("downloaded, but could not put it on the shelf: %w", err)
 	}
+	// The cover is made here rather than left to the cover maker, which
+	// looks videos up in the station's library and would find this one only
+	// after the rescan.
+	w.makeCover(shelf.Ref{Channel: ch.ID, ID: entry.ID}, filepath.Join(library.ChannelDir(w.root, ch.ID), sidecar.File), sidecar.Duration)
 	if w.rescan != nil {
 		w.rescan()
 	}
@@ -241,6 +247,21 @@ func (w *grownupWorker) download(link string, found func(title, id string)) (str
 		w.saved()
 	}
 	return title, entry.ID, nil
+}
+
+// makeCover grabs a new video's first cover. A video without one still
+// plays, so a failure is only logged.
+func (w *grownupWorker) makeCover(ref shelf.Ref, video string, duration float64) {
+	key := shelf.ItemKey(ref)
+	if w.covers.Has(key) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	at := shelf.DefaultFrame(time.Duration(duration * float64(time.Second)))
+	if err := w.covers.FromFrame(ctx, key, video, at); err != nil {
+		w.log.Warn("could not make a cover for a grown-up video", "key", key, "error", err)
+	}
 }
 
 // channel is the grown-up channel's config, which must exist and be hidden.
@@ -315,6 +336,10 @@ func (w *grownupWorker) Delete(id string) error {
 			w.log.Warn("could not remove a deleted video's cover", "id", id, "error", err)
 		}
 	}
+	// A deleted video is no longer "on the shelf", so the page stops saying so.
+	w.mu.Lock()
+	w.recent = slices.DeleteFunc(w.recent, func(d api.Download) bool { return d.ID == id && d.State == api.DownloadDone })
+	w.mu.Unlock()
 	if w.rescan != nil {
 		w.rescan()
 	}

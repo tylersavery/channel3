@@ -117,7 +117,10 @@ func grownupFixture(t *testing.T, runner library.Runner, hidden bool) (*grownupW
 	if err := os.WriteFile(filepath.Join(channels, "grownup.yaml"), []byte(yaml), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	w := newGrownupWorker(root, shelf.NewStoreAt(shelf.GrownupPath(root)), shelf.Covers{Dir: shelf.CoversDir(root)},
+	covers := shelf.Covers{Dir: shelf.CoversDir(root), Grab: func(_ context.Context, _, out string, _ time.Duration) error {
+		return os.WriteFile(out, []byte("jpeg"), 0o644)
+	}}
+	w := newGrownupWorker(root, shelf.NewStoreAt(shelf.GrownupPath(root)), covers,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	w.runner, w.prober, w.measurer = runner, fakeProbe{}, nil
 	return w, root
@@ -178,6 +181,9 @@ func TestAPastedLinkLandsOnTheGrownupShelf(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(library.ChannelDir(root, "grownup"), "lect001.mp4")); err != nil {
 		t.Errorf("the video is not in the grown-up channel: %v", err)
 	}
+	if !w.covers.Has("grownup/lect001") {
+		t.Error("the new video has no cover")
+	}
 	if rescans != 1 {
 		t.Errorf("%d rescans, want one so the menu can play it", rescans)
 	}
@@ -200,6 +206,13 @@ func TestAGrownupDownloadThatFailsSaysWhy(t *testing.T) {
 	d, _ = w.Add(lecture)
 	if got := runOne(t, w, d.Key); got.State != api.DownloadFailed || !strings.Contains(got.Error, "403") {
 		t.Errorf("download %+v, want failed with yt-dlp's reason", got)
+	}
+}
+
+func TestNoDownloadsIsAnEmptyList(t *testing.T) {
+	w, _ := grownupFixture(t, lectureRunner(), true)
+	if d := w.Downloads(); d == nil {
+		t.Error("no downloads is nil, which the page reads as null")
 	}
 }
 
@@ -238,6 +251,12 @@ func TestDeletingAGrownupVideo(t *testing.T) {
 	left, _ := filepath.Glob(filepath.Join(library.ChannelDir(root, "grownup"), "lect001.*"))
 	if len(left) != 0 {
 		t.Errorf("files left behind: %v", left)
+	}
+	if w.covers.Has("grownup/lect001") {
+		t.Error("the cover was left behind")
+	}
+	if len(w.Downloads()) != 0 {
+		t.Errorf("downloads %+v still list the deleted video", w.Downloads())
 	}
 
 	if err := w.Delete("lect001"); !errors.Is(err, api.ErrNoSuchVideo) {

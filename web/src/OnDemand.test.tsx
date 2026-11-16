@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { LibraryResponse, ShelfEntry, ShelfResponse } from './api'
 import { Guide } from './Guide'
@@ -17,6 +17,13 @@ const library: LibraryResponse = {
         { id: 't1', title: 'Combine Time', duration: 1500, on_shelf: true },
         { id: 't2', title: 'Tumbling Time', duration: 1400, on_shelf: false },
       ],
+    },
+    {
+      id: 'grownup',
+      number: 90,
+      name: 'Grown-ups',
+      hidden: true,
+      items: [{ id: 'g1', title: 'How Bridges Work', duration: 900, on_shelf: false }],
     },
     {
       id: 'radio',
@@ -55,10 +62,12 @@ const shelfResponse: ShelfResponse = {
   ],
 }
 
-function fakeControls(shelf: ShelfResponse = shelfResponse) {
+function fakeControls(shelf: ShelfResponse = shelfResponse, name: ShelfControls['name'] = 'lane') {
   const save = vi.fn<(edit: (entries: ShelfEntry[]) => ShelfEntry[]) => Promise<void>>().mockResolvedValue()
   const controls: ShelfControls = {
+    name,
     shelf,
+    absent: false,
     loadError: null,
     notice: null,
     busy: false,
@@ -156,6 +165,97 @@ describe('OnDemand', () => {
     const { controls } = fakeControls({ ...shelfResponse, editable: false })
     render(<OnDemand controls={controls} />)
     expect(screen.getByText(/no upload PIN/)).toBeInTheDocument()
+  })
+})
+
+/** The station as the Grown-ups tab sees it: the library, the downloads, and every change it is sent. */
+function stubGrownupStation() {
+  const calls: { method: string; url: string; body: string }[] = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      const method = init?.method ?? 'GET'
+      calls.push({ method, url, body: typeof init?.body === 'string' ? init.body : '' })
+      let body: unknown = library
+      if (url.startsWith('/api/grownup/downloads')) {
+        body =
+          method === 'POST'
+            ? { key: 1, url: 'https://youtu.be/x', state: 'queued' }
+            : { downloads: [{ key: 7, url: 'https://youtu.be/bad', state: 'failed', error: 'that is a playlist' }] }
+      } else if (url.startsWith('/api/grownup/videos')) {
+        body = { deleted: 'g1' }
+      }
+      return Promise.resolve(new Response(JSON.stringify(body), { status: method === 'POST' ? 202 : 200 }))
+    }),
+  )
+  return calls
+}
+
+const grownupShelf: ShelfResponse = {
+  revision: 1,
+  editable: true,
+  entries: [
+    { item: { channel: 'grownup', id: 'g1', library_title: 'How Bridges Work', duration: 900, missing: false, cover: '' } },
+    { item: { channel: 'farmtv', id: 't2', library_title: 'Tumbling Time', duration: 1400, missing: false, cover: '' } },
+  ],
+}
+
+/** Controls whose run hands the change the grown-up code at once. */
+function grownupControls() {
+  const { controls, save } = fakeControls(grownupShelf, 'grownup')
+  controls.run = vi.fn(async (change: (pin: string) => Promise<void>) => {
+    await change('4217')
+  })
+  return { controls, save }
+}
+
+describe('Grown-ups', () => {
+  it('keeps grown-up downloads off Lane\'s library', async () => {
+    stubLibrary()
+    const { controls } = fakeControls()
+    render(<OnDemand controls={controls} />)
+    await screen.findByText(/4 Farm TV/)
+    expect(screen.queryByText(/Grown-ups/)).not.toBeInTheDocument()
+  })
+
+  it('pastes a link with the grown-up code, and shows why a download failed', async () => {
+    const calls = stubGrownupStation()
+    const { controls } = grownupControls()
+    render(<OnDemand controls={controls} />)
+
+    expect(await screen.findByText('Failed: that is a playlist')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('YouTube link'), {
+      target: { value: '  https://www.youtube.com/watch?v=x  ' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    await waitFor(() => {
+      expect(calls.some((c) => c.method === 'POST')).toBe(true)
+    })
+    const post = calls.find((c) => c.method === 'POST')
+    expect(post?.url).toBe('/api/grownup/downloads')
+    expect(JSON.parse(post?.body ?? '{}')).toEqual({ url: 'https://www.youtube.com/watch?v=x' })
+    await waitFor(() => {
+      expect(screen.getByLabelText('YouTube link')).toHaveValue('')
+    })
+  })
+
+  it('deletes a downloaded video, and only takes a library video off the shelf', async () => {
+    const calls = stubGrownupStation()
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    const { controls, save } = grownupControls()
+    render(<OnDemand controls={controls} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit How Bridges Work' }))
+    fireEvent.click(within(screen.getByTestId('item-grownup/g1')).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => {
+      expect(calls.some((c) => c.method === 'DELETE' && c.url === '/api/grownup/videos?id=g1')).toBe(true)
+    })
+    expect(save).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Tumbling Time' }))
+    fireEvent.click(within(screen.getByTestId('item-farmtv/t2')).getByRole('button', { name: 'Remove' }))
+    expect(save).toHaveBeenCalled()
   })
 })
 

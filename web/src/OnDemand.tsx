@@ -1,11 +1,17 @@
 // The On Demand tab: the shelf channel 0 offers after the code, and every
-// video in the library with a switch to put it there.
+// video in the library with a switch to put it there. The Grown-ups tab is the
+// same page over the grown-up shelf, with a box to paste a link into.
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
+  addLink,
+  deleteGrownupVideo,
+  fetchDownloads,
   fetchLibrary,
   grabFrame,
+  grownupChannel,
   uploadCover,
+  type Download,
   type LibraryChannel,
   type LibraryItem,
   type ShelfEntry,
@@ -42,9 +48,14 @@ export function OnDemand({ controls }: OnDemandProps) {
 
   useEffect(() => {
     const controller = new AbortController()
-    fetchLibrary(controller.signal)
+    fetchLibrary(controller.signal, controls.name)
       .then((response) => {
-        setLibrary(response.channels)
+        // Lane's shelf never offers what was downloaded for the grown-ups.
+        setLibrary(
+          controls.name === 'lane'
+            ? response.channels.filter((channel) => channel.id !== grownupChannel)
+            : response.channels,
+        )
       })
       .catch((cause: unknown) => {
         if (!controller.signal.aborted) {
@@ -54,7 +65,7 @@ export function OnDemand({ controls }: OnDemandProps) {
     return () => {
       controller.abort()
     }
-  }, [])
+  }, [controls.name])
 
   const channelNames = useMemo(
     () => new Map((library ?? []).map((channel) => [channel.id, channel.name])),
@@ -67,12 +78,23 @@ export function OnDemand({ controls }: OnDemandProps) {
 
   return (
     <div className="ondemand">
-      <p className="ondemand__intro">
-        What channel 0 shows after the code, in this order. Movies come first, in a folder of their own.
-      </p>
+      {controls.name === 'grownup' ? (
+        <>
+          <p className="ondemand__intro">
+            What channel 0 shows after the grown-up code, in this order. Paste a link and the box downloads it in
+            the background; it lands at the top when it is ready.
+          </p>
+          <AddLink controls={controls} />
+        </>
+      ) : (
+        <p className="ondemand__intro">
+          What channel 0 shows after the code, in this order. Movies come first, in a folder of their own.
+        </p>
+      )}
       {shelf.editable ? null : (
         <p className="notice" role="status">
-          This box has no upload PIN, so the shelf cannot be changed from here.
+          This box has no {controls.name === 'grownup' ? 'grown-up code' : 'upload PIN'}, so the shelf cannot be
+          changed from here.
         </p>
       )}
       <Shelf controls={controls} entries={shelf.entries} channelNames={channelNames} />
@@ -291,9 +313,24 @@ function ItemRow({ controls, item, folder, folders, channelNames, onUp, onDown }
   }
   const anotherFrame = () => {
     void run(async (pin) => {
-      await grabFrame(refKey(item), randomFrame(item.duration), pin)
+      await grabFrame(refKey(item), randomFrame(item.duration), pin, controls.name)
       await reload()
     })
+  }
+  // On the grown-up shelf a pasted video is deleted outright: it was only
+  // ever downloaded to be on this shelf.
+  const deletes = controls.name === 'grownup' && item.channel === grownupChannel
+  const remove = () => {
+    if (!deletes) {
+      void save((current) => removeItem(current, item))
+      return
+    }
+    if (window.confirm(`Delete ${title} from the box?`)) {
+      void run(async (pin) => {
+        await deleteGrownupVideo(item.id, pin)
+        await reload()
+      })
+    }
   }
 
   return (
@@ -364,9 +401,9 @@ function ItemRow({ controls, item, folder, folders, channelNames, onUp, onDown }
             type="button"
             className="button button--danger"
             disabled={busy}
-            onClick={() => void save((current) => removeItem(current, item))}
+            onClick={remove}
           >
-            Remove
+            {deletes ? 'Delete' : 'Remove'}
           </button>
         </div>
       ) : null}
@@ -397,7 +434,7 @@ function PictureButton({ controls, coverKey }: PictureButtonProps) {
             return
           }
           void run(async (pin) => {
-            await uploadCover(coverKey, file, pin)
+            await uploadCover(coverKey, file, pin, controls.name)
             await reload()
           })
         }}
@@ -415,6 +452,123 @@ function Cover({ src, title }: { src: string; title: string }) {
     )
   }
   return <img className="cover" src={src} alt="" loading="lazy" />
+}
+
+/** How often the downloads are looked at again while one is still going. */
+const downloadPollMs = 3000
+/** How long the station takes to read a new download into its library. */
+const libraryCatchUpMs = 2500
+
+/** A box to paste a link into, and the links pasted lately with how each is getting on. */
+function AddLink({ controls }: { controls: ShelfControls }) {
+  const [link, setLink] = useState('')
+  const [downloads, setDownloads] = useState<Download[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const finished = useRef(new Set<number>())
+  const { run, reload, busy } = controls
+
+  // A paste bumps this, so the list is read at once rather than at the next poll.
+  const [pasted, setPasted] = useState(0)
+  const going = downloads.some((d) => d.state === 'queued' || d.state === 'downloading')
+
+  useEffect(() => {
+    const controller = new AbortController()
+    const look = async () => {
+      try {
+        const next = await fetchDownloads(controller.signal)
+        setDownloads(next)
+        setError(null)
+        // A download that has just finished is on the shelf now.
+        const done = next.filter((d) => d.state === 'done' && !finished.current.has(d.key))
+        for (const d of next) {
+          if (d.state === 'done' || d.state === 'failed') {
+            finished.current.add(d.key)
+          }
+        }
+        if (done.length > 0) {
+          // Once now, and again when the station has read the library and
+          // can say how long the new video is.
+          await reload()
+          setTimeout(() => {
+            void reload()
+          }, libraryCatchUpMs)
+        }
+      } catch (cause) {
+        if (!controller.signal.aborted) {
+          setError(cause instanceof Error ? cause.message : String(cause))
+        }
+      }
+    }
+    void look()
+    const timer = going
+      ? setInterval(() => {
+          void look()
+        }, downloadPollMs)
+      : undefined
+    return () => {
+      controller.abort()
+      clearInterval(timer)
+    }
+  }, [going, pasted, reload])
+
+  const submit = (event: { preventDefault: () => void }) => {
+    event.preventDefault()
+    if (link.trim() === '') {
+      return
+    }
+    void run(async (pin) => {
+      await addLink(link.trim(), pin)
+      setLink('')
+      setPasted((n) => n + 1)
+    })
+  }
+
+  return (
+    <section className="section" aria-labelledby="add-link-heading">
+      <h2 id="add-link-heading" className="section__title">
+        Add a video
+      </h2>
+      <form className="filters filters--link" onSubmit={submit}>
+        <label className="field field--grow">
+          <span className="field__label">YouTube link</span>
+          <input
+            className="input"
+            type="url"
+            inputMode="url"
+            placeholder="https://www.youtube.com/watch?v=…"
+            autoComplete="off"
+            value={link}
+            onChange={(event) => {
+              setLink(event.target.value)
+            }}
+          />
+        </label>
+        <button type="submit" className="button button--primary" disabled={busy || link.trim() === ''}>
+          Add
+        </button>
+      </form>
+      {error === null ? null : <p className="notice">Cannot read the downloads. {error}</p>}
+      {downloads.length === 0 ? null : (
+        <ul className="downloads">
+          {downloads.map((d) => (
+            <li key={d.key} className={`downloads__item downloads__item--${d.state}`}>
+              <span className="downloads__title">{d.title ?? d.url}</span>
+              <span className="downloads__state">
+                {d.state === 'failed' ? `Failed: ${d.error ?? 'no reason given'}` : downloadState[d.state]}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+const downloadState: Record<Download['state'], string> = {
+  queued: 'Waiting',
+  downloading: 'Downloading',
+  done: 'On the shelf',
+  failed: 'Failed',
 }
 
 interface LibraryProps {

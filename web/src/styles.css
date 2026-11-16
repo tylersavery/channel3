@@ -636,6 +636,41 @@ body {
   min-width: 7.5rem;
 }
 
+.filters--link {
+  align-items: flex-end;
+}
+
+.downloads {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+}
+
+.downloads__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.25rem 0.75rem;
+  padding: 0.4rem 0.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.downloads__title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.downloads__state {
+  color: var(--muted);
+  font-size: 0.9em;
+}
+
+.downloads__item--downloading .downloads__state,
+.downloads__item--done .downloads__state {
+  color: var(--accent-text);
+}
+
 @media (min-width: 900px) {
   .tabs {
     order: 0;

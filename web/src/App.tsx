@@ -15,11 +15,18 @@ const guideIntervalMs = 5 * 60_000
 /** How often the progress bars and the station clock move between refreshes. */
 const tickIntervalMs = 1_000
 
-type View = 'guide' | 'ondemand'
+type View = 'guide' | 'ondemand' | 'grownup'
 
 /** The tab the address asks for, so On Demand can be bookmarked. */
 function viewFromHash(): View {
-  return window.location.hash === '#on-demand' ? 'ondemand' : 'guide'
+  switch (window.location.hash) {
+    case '#on-demand':
+      return 'ondemand'
+    case '#grown-ups':
+      return 'grownup'
+    default:
+      return 'guide'
+  }
 }
 
 export function App() {
@@ -31,6 +38,13 @@ export function App() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [view, setView] = useState<View>(viewFromHash)
   const controls = useShelf()
+  // The grown-up shelf answers 404 on a box without its code, and then its
+  // tab is not shown.
+  const grownupControls = useShelf('grownup')
+  const showGrownup = !grownupControls.absent
+  // The PIN prompt and notices belong to whichever shelf the tab is changing.
+  const active = view === 'grownup' ? grownupControls : controls
+  const shelfView = view === 'ondemand' || view === 'grownup'
 
   useEffect(() => {
     const follow = () => {
@@ -146,6 +160,11 @@ export function App() {
           <a className="tabs__tab" href="#on-demand" aria-current={view === 'ondemand' ? 'page' : undefined}>
             On Demand
           </a>
+          {showGrownup ? (
+            <a className="tabs__tab" href="#grown-ups" aria-current={view === 'grownup' ? 'page' : undefined}>
+              Grown-ups
+            </a>
+          ) : null}
         </nav>
         {now === null ? null : (
           <p className="header__clock">
@@ -158,9 +177,16 @@ export function App() {
       </header>
 
 
-      {view === 'ondemand' ? <OnDemand controls={controls} /> : null}
+      {view === 'ondemand' ? <OnDemand key="lane" controls={controls} /> : null}
+      {view === 'grownup' ? (
+        showGrownup ? (
+          <OnDemand key="grownup" controls={grownupControls} />
+        ) : (
+          <p className="empty">This box has no grown-up shelf.</p>
+        )
+      ) : null}
 
-      {view === 'ondemand' || (nowError === null && guideError === null) ? null : (
+      {shelfView || (nowError === null && guideError === null) ? null : (
         <p className="notice" role="status">
           {now === null
             ? `Cannot reach the station. ${nowError ?? guideError ?? ''}`
@@ -168,7 +194,7 @@ export function App() {
         </p>
       )}
 
-      {view === 'ondemand' ? null : now === null ? (
+      {shelfView ? null : now === null ? (
         nowError === null ? (
           <p className="empty">Loading the guide.</p>
         ) : null
@@ -178,17 +204,17 @@ export function App() {
 
       {/* Pinned to the bottom of the screen, so the PIN and any trouble are
           seen wherever on the page the change was asked for. */}
-      {controls.askingPin || controls.notice !== null ? (
+      {active.askingPin || active.notice !== null ? (
         <div className="dock">
-          {controls.notice === null ? null : (
+          {active.notice === null ? null : (
             <p className="notice dock__notice" role="status">
-              {controls.notice}{' '}
-              <button type="button" className="button button--quiet dock__dismiss" onClick={controls.dismissNotice}>
+              {active.notice}{' '}
+              <button type="button" className="button button--quiet dock__dismiss" onClick={active.dismissNotice}>
                 OK
               </button>
             </p>
           )}
-          {controls.askingPin ? <PinPrompt controls={controls} /> : null}
+          {active.askingPin ? <PinPrompt controls={active} /> : null}
         </div>
       ) : null}
     </div>
@@ -213,7 +239,9 @@ function PinPrompt({ controls }: { controls: ShelfControls }) {
   return (
     <form className="pin" onSubmit={submit}>
       <label className="field field--grow">
-        <span className="field__label">The code, to change On Demand</span>
+        <span className="field__label">
+          {controls.name === 'grownup' ? 'The grown-up code, to change this shelf' : 'The code, to change On Demand'}
+        </span>
         <input
           className="input"
           type="password"

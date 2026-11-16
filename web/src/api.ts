@@ -152,6 +152,8 @@ export interface LibraryChannel {
   id: string
   number: number
   name: string
+  /** Off the dial, so only On Demand can offer its videos. */
+  hidden?: boolean
   /** Empty, never null. */
   items: LibraryItem[]
 }
@@ -196,14 +198,25 @@ export interface ShelfResponse {
   editable: boolean
 }
 
-/** Every video the station can play, by channel. */
-export function fetchLibrary(signal?: AbortSignal): Promise<LibraryResponse> {
-  return getJSON<LibraryResponse>('/api/library', signal)
+/** Which shelf: Lane's, opened with the upload PIN, or the grown-up one behind its own code. */
+export type ShelfName = 'lane' | 'grownup'
+
+/** The query naming a shelf, joined to a path that may already have one. */
+function onShelf(path: string, shelf: ShelfName): string {
+  if (shelf === 'lane') {
+    return path
+  }
+  return `${path}${path.includes('?') ? '&' : '?'}shelf=${shelf}`
 }
 
-/** The On Demand shelf. */
-export function fetchShelf(signal?: AbortSignal): Promise<ShelfResponse> {
-  return getJSON<ShelfResponse>('/api/shelf', signal)
+/** Every video the station can play, by channel, marked against one shelf. */
+export function fetchLibrary(signal?: AbortSignal, shelf: ShelfName = 'lane'): Promise<LibraryResponse> {
+  return getJSON<LibraryResponse>(onShelf('/api/library', shelf), signal)
+}
+
+/** An On Demand shelf. A box without the grown-up shelf answers 404 for it. */
+export function fetchShelf(signal?: AbortSignal, shelf: ShelfName = 'lane'): Promise<ShelfResponse> {
+  return getJSON<ShelfResponse>(onShelf('/api/shelf', shelf), signal)
 }
 
 /** Sends a change with the PIN and reads the JSON answer. */
@@ -233,10 +246,11 @@ export function saveShelf(
   revision: number,
   entries: ShelfEntry[],
   pin: string,
+  shelf: ShelfName = 'lane',
 ): Promise<ShelfResponse> {
   return change<ShelfResponse>(
     'PUT',
-    '/api/shelf',
+    onShelf('/api/shelf', shelf),
     pin,
     JSON.stringify({ revision, entries: entriesToSave(entries) }),
     'application/json',
@@ -259,10 +273,15 @@ export function entriesToSave(entries: ShelfEntry[]): unknown[] {
 }
 
 /** Replaces a cover with a picture from the phone. */
-export function uploadCover(key: string, picture: Blob, pin: string): Promise<{ cover: string }> {
+export function uploadCover(
+  key: string,
+  picture: Blob,
+  pin: string,
+  shelf: ShelfName = 'lane',
+): Promise<{ cover: string }> {
   return change<{ cover: string }>(
     'PUT',
-    `/api/shelf/cover?key=${encodeURIComponent(key)}`,
+    onShelf(`/api/shelf/cover?key=${encodeURIComponent(key)}`, shelf),
     pin,
     picture,
     picture.type || 'application/octet-stream',
@@ -270,12 +289,52 @@ export function uploadCover(key: string, picture: Blob, pin: string): Promise<{ 
 }
 
 /** Makes an item's cover from the frame `at` seconds into its video. */
-export function grabFrame(key: string, at: number, pin: string): Promise<{ cover: string }> {
+export function grabFrame(
+  key: string,
+  at: number,
+  pin: string,
+  shelf: ShelfName = 'lane',
+): Promise<{ cover: string }> {
   return change<{ cover: string }>(
     'POST',
-    `/api/shelf/cover/frame?key=${encodeURIComponent(key)}&at=${at.toFixed(1)}`,
+    onShelf(`/api/shelf/cover/frame?key=${encodeURIComponent(key)}&at=${at.toFixed(1)}`, shelf),
     pin,
     '',
     'text/plain',
   )
 }
+
+/** One pasted link on the grown-up shelf and how far it has got. */
+export interface Download {
+  key: number
+  url: string
+  title?: string
+  state: 'queued' | 'downloading' | 'done' | 'failed'
+  error?: string
+  id?: string
+}
+
+/** What was pasted recently, newest first. */
+export async function fetchDownloads(signal?: AbortSignal): Promise<Download[]> {
+  const response = await getJSON<{ downloads: Download[] | null }>('/api/grownup/downloads', signal)
+  return response.downloads ?? []
+}
+
+/** Queues a link to download onto the grown-up shelf. */
+export function addLink(url: string, pin: string): Promise<Download> {
+  return change<Download>('POST', '/api/grownup/downloads', pin, JSON.stringify({ url }), 'application/json')
+}
+
+/** Takes a downloaded video off the grown-up shelf and deletes it from the box. */
+export function deleteGrownupVideo(id: string, pin: string): Promise<{ deleted: string }> {
+  return change<{ deleted: string }>(
+    'DELETE',
+    `/api/grownup/videos?id=${encodeURIComponent(id)}`,
+    pin,
+    '',
+    'text/plain',
+  )
+}
+
+/** The hidden channel pasted links are downloaded into. */
+export const grownupChannel = 'grownup'

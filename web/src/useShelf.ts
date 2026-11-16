@@ -1,31 +1,36 @@
-// The On Demand shelf as the page holds it: read from the station, changed
-// with the upload PIN, and read again when another phone got there first.
+// An On Demand shelf as the page holds it: read from the station, changed
+// with its code, and read again when another phone got there first. Lane's
+// shelf takes the upload PIN; the grown-up shelf takes its own code.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { fetchShelf, saveShelf, StationError, type ShelfEntry, type ShelfResponse } from './api'
+import { fetchShelf, saveShelf, StationError, type ShelfEntry, type ShelfName, type ShelfResponse } from './api'
 
-const pinStorageKey = 'channel3.upload-pin'
+/** Where each shelf's code is remembered on this phone. */
+const pinStorageKeys: Record<ShelfName, string> = {
+  lane: 'channel3.upload-pin',
+  grownup: 'channel3.grownup-pin',
+}
 
 /** How long to wait before looking again for covers the station is still making. */
 const coverRetryMs = 3000
 /** How many times to look before giving up on a cover that will not come. */
 const coverRetries = 10
 
-function readPin(): string {
+function readPin(name: ShelfName): string {
   try {
-    return localStorage.getItem(pinStorageKey) ?? ''
+    return localStorage.getItem(pinStorageKeys[name]) ?? ''
   } catch {
     // Private browsing can refuse storage. The PIN is then asked for once a visit.
     return ''
   }
 }
 
-function writePin(pin: string): void {
+function writePin(name: ShelfName, pin: string): void {
   try {
     if (pin === '') {
-      localStorage.removeItem(pinStorageKey)
+      localStorage.removeItem(pinStorageKeys[name])
     } else {
-      localStorage.setItem(pinStorageKey, pin)
+      localStorage.setItem(pinStorageKeys[name], pin)
     }
   } catch {
     // As above: without storage the PIN lives only as long as the page.
@@ -36,8 +41,12 @@ function writePin(pin: string): void {
 export type Change = (pin: string) => Promise<void>
 
 export interface ShelfControls {
+  /** Which shelf these controls are for. */
+  name: ShelfName
   /** The shelf, or null before it has loaded or on a box without one. */
   shelf: ShelfResponse | null
+  /** The box has no such shelf: it answered 404. */
+  absent: boolean
   /** Why the shelf could not be read, when it could not. */
   loadError: string | null
   /** The last change's trouble, for a line above the shelf. */
@@ -69,34 +78,36 @@ function waitingForCovers(shelf: ShelfResponse): boolean {
   )
 }
 
-export function useShelf(): ShelfControls {
+export function useShelf(name: ShelfName = 'lane'): ShelfControls {
   const [shelf, setShelf] = useState<ShelfResponse | null>(null)
+  const [absent, setAbsent] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [pin, setPin] = useState(readPin)
+  const [pin, setPin] = useState(() => readPin(name))
   const [askingPin, setAskingPin] = useState(false)
   const pending = useRef<Change | null>(null)
   const coverLooks = useRef(0)
 
   const reload = useCallback(async () => {
     try {
-      setShelf(await fetchShelf())
+      setShelf(await fetchShelf(undefined, name))
       setLoadError(null)
     } catch (cause) {
       setLoadError(describe(cause))
     }
-  }, [])
+  }, [name])
 
   useEffect(() => {
     const controller = new AbortController()
     const load = async () => {
       try {
-        const response = await fetchShelf(controller.signal)
+        const response = await fetchShelf(controller.signal, name)
         setShelf(response)
         setLoadError(null)
       } catch (cause) {
         if (!controller.signal.aborted) {
+          setAbsent(cause instanceof StationError && cause.status === 404)
           setLoadError(describe(cause))
         }
       }
@@ -105,7 +116,7 @@ export function useShelf(): ShelfControls {
     return () => {
       controller.abort()
     }
-  }, [])
+  }, [name])
 
   useEffect(() => {
     if (shelf === null || !waitingForCovers(shelf) || coverLooks.current >= coverRetries) {
@@ -129,7 +140,7 @@ export function useShelf(): ShelfControls {
         coverLooks.current = 0
       } catch (cause) {
         if (cause instanceof StationError && cause.status === 403) {
-          writePin('')
+          writePin(name, '')
           setPin('')
           pending.current = change
           setAskingPin(true)
@@ -144,7 +155,7 @@ export function useShelf(): ShelfControls {
         setBusy(false)
       }
     },
-    [reload],
+    [reload, name],
   )
 
   const run = useCallback(
@@ -165,9 +176,9 @@ export function useShelf(): ShelfControls {
         if (shelf === null) {
           return
         }
-        setShelf(await saveShelf(shelf.revision, edit(shelf.entries), withPin))
+        setShelf(await saveShelf(shelf.revision, edit(shelf.entries), withPin, name))
       }),
-    [run, shelf],
+    [run, shelf, name],
   )
 
   const submitPin = useCallback(
@@ -176,7 +187,7 @@ export function useShelf(): ShelfControls {
       if (trimmed === '') {
         return
       }
-      writePin(trimmed)
+      writePin(name, trimmed)
       setPin(trimmed)
       setAskingPin(false)
       const change = pending.current
@@ -185,7 +196,7 @@ export function useShelf(): ShelfControls {
         void attempt(trimmed, change)
       }
     },
-    [attempt],
+    [attempt, name],
   )
 
   const cancelPin = useCallback(() => {
@@ -197,5 +208,19 @@ export function useShelf(): ShelfControls {
     setNotice(null)
   }, [])
 
-  return { shelf, loadError, notice, busy, askingPin, save, run, reload, submitPin, cancelPin, dismissNotice }
+  return {
+    name,
+    shelf,
+    absent,
+    loadError,
+    notice,
+    busy,
+    askingPin,
+    save,
+    run,
+    reload,
+    submitPin,
+    cancelPin,
+    dismissNotice,
+  }
 }
