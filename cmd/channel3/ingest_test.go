@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 )
 
@@ -79,6 +80,28 @@ func TestIngestExitCodes(t *testing.T) {
 		writeChannelConfig(t, root, "quiet.yaml", "id: quiet\nnumber: 9\nname: Quiet Channel\nsources: []\n")
 
 		if got := run([]string{"ingest", "--root", root, "--yt-dlp", missingBinary(t)}); got != 0 {
+			t.Errorf("exit code = %d, want 0", got)
+		}
+	})
+
+	t.Run("beside the broadcast needs a channel", func(t *testing.T) {
+		root := t.TempDir()
+		writeChannelConfig(t, root, "quiet.yaml", "id: quiet\nnumber: 9\nname: Quiet Channel\nsources: []\n")
+		if got := run([]string{"ingest", "--root", root, "--beside-broadcast"}); got != 1 {
+			t.Errorf("exit code = %d, want 1", got)
+		}
+	})
+
+	t.Run("beside the broadcast runs while serve does", func(t *testing.T) {
+		root := t.TempDir()
+		writeChannelConfig(t, root, "quiet.yaml", "id: quiet\nnumber: 9\nname: Quiet Channel\nsources: []\n")
+		if err := os.WriteFile(filepath.Join(root, "serve.pid"), []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := run([]string{"ingest", "--root", root, "--channel", "quiet"}); got != 1 {
+			t.Errorf("a plain ingest beside serve exited %d, want 1", got)
+		}
+		if got := run([]string{"ingest", "--root", root, "--channel", "quiet", "--beside-broadcast"}); got != 0 {
 			t.Errorf("exit code = %d, want 0", got)
 		}
 	})
