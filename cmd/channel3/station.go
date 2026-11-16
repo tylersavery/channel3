@@ -74,6 +74,9 @@ type station struct {
 	// rollover. It holds one request: several arriving together are one
 	// rescan.
 	rescans chan struct{}
+	// rescanned, when set, is told after every rescan that loaded channels,
+	// which is how covers are made for videos that have just arrived.
+	rescanned func()
 	// numberUntil is when the channel number on screen comes down. mpv shows
 	// one message at a time, so a song's title waits for it.
 	numberUntil time.Time
@@ -1283,12 +1286,15 @@ func (s *station) rescan() {
 	s.log.Info("library rescanned", "channels", len(channels))
 	s.setChannels(channels)
 	s.refreshCards()
-	if _, ok := s.channel(s.tuned); ok {
+	if ch, ok := s.channel(s.tuned); ok && !ch.Hidden {
 		s.retune()
 	} else if err := s.tune(""); err != nil {
 		s.log.Error("could not tune a channel after the rescan", "error", err)
 	}
 	s.reconcile()
+	if s.rescanned != nil {
+		s.rescanned()
+	}
 }
 
 // channel returns the tuned channel by id.

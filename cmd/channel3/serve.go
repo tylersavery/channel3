@@ -363,8 +363,13 @@ func serve(ctx context.Context, root string, opts serveOptions) error {
 	if err != nil {
 		return err
 	}
+	station.rescanned = coverMaker.Kick
 	current.Store(station)
 	coverMaker.Kick()
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	defer signal.Stop(hup)
+	go rescanOnHangup(ctx, station, hup)
 
 	slog.Info("broadcasting", "root", root, "channel", station.Tuned(), "pid", os.Getpid())
 	return station.run(ctx)
@@ -537,5 +542,20 @@ func pidFileOwner(path string) (int, error) {
 func removePIDFile(path string) {
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		slog.Error("could not remove the pid file", "path", path, "error", err)
+	}
+}
+
+// rescanOnHangup rereads the channel config and the library each time serve
+// is sent SIGHUP, the way a home video upload does, so video rsynced to the Pi
+// and channel files copied over reach the air without a restart.
+func rescanOnHangup(ctx context.Context, s *station, hup <-chan os.Signal) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-hup:
+			slog.Info("SIGHUP: reading the channels and the library again")
+			s.RequestRescan()
+		}
 	}
 }

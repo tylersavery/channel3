@@ -1,6 +1,9 @@
 package main
 
 import (
+	"os"
+	"syscall"
+
 	"bytes"
 	"context"
 	"errors"
@@ -2430,5 +2433,37 @@ func TestTheGuideLeavesOutHiddenChannels(t *testing.T) {
 		if row.Number == channels[len(channels)-1].Number {
 			t.Errorf("the guide lists hidden channel %d", row.Number)
 		}
+	}
+}
+
+// TestRescanTellsWhoIsWaitingAndLeavesAHiddenChannel is the hook covers hang
+// off, and a tuned channel that the new config hides being left for the dial.
+func TestRescanTellsWhoIsWaitingAndLeavesAHiddenChannel(t *testing.T) {
+	s := newTestStation(t, newFakePlayer(), &fakeClock{now: noon()}, "clips", keyChannels())
+	s.play()
+	told := 0
+	s.rescanned = func() { told++ }
+	s.reload = func() ([]schedule.Channel, error) { return hiddenChannels(), nil }
+	s.rescan()
+	if told != 1 {
+		t.Errorf("rescanned told %d times, want once", told)
+	}
+	if s.Tuned() == "clips" {
+		t.Error("the rescan stayed on a channel it hid")
+	}
+}
+
+// TestHangupRescans is SIGHUP to serve rereading the library.
+func TestHangupRescans(t *testing.T) {
+	s := newTestStation(t, newFakePlayer(), &fakeClock{now: noon()}, "clips", keyChannels())
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	hup := make(chan os.Signal, 1)
+	go rescanOnHangup(ctx, s, hup)
+	hup <- syscall.SIGHUP
+	select {
+	case <-s.rescans:
+	case <-time.After(2 * time.Second):
+		t.Fatal("SIGHUP asked for no rescan")
 	}
 }
