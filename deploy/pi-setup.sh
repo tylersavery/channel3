@@ -17,7 +17,7 @@ set -euo pipefail
 # yt-dlp is pinned to a known version and installed as the standalone binary,
 # because Debian's package is always months stale and ingest breaks the day
 # YouTube changes something. Bump this deliberately, then re-run this script.
-YTDLP_VERSION="2026.08.19"
+YTDLP_VERSION="2026.10.26"
 YTDLP_ASSET="yt-dlp_linux_aarch64"
 YTDLP_RELEASE="https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}"
 YTDLP_URL="${YTDLP_RELEASE}/${YTDLP_ASSET}"
